@@ -1,0 +1,27 @@
+{
+  "name": "Dinkly",
+  "short_name": "Dinkly",
+  "description": "The ultimate Pickleball round-robin manager",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1e293b",
+  "theme_color": "#a3e635",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/isometric/192/pickleball.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://img.icons8.com/isometric/512/pickleball.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "https://img.icons8.com/isometric/512/pickleball.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

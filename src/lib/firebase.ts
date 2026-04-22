@@ -1,0 +1,88 @@
+import { initializeApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
+import { 
+  getFirestore, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  onSnapshot,
+  updateDoc,
+  addDoc,
+  serverTimestamp,
+  Timestamp,
+  increment,
+  writeBatch
+} from 'firebase/firestore';
+import firebaseConfig from './firebaseConfig';
+
+const app = initializeApp(firebaseConfig);
+export const auth = getAuth(app);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const googleProvider = new GoogleAuthProvider();
+
+export const signIn = () => signInWithPopup(auth, googleProvider);
+export const signInAsGuest = () => signInAnonymously(auth);
+export const logout = () => auth.signOut();
+
+export interface Tournament {
+  id: string;
+  name: string;
+  code: string;
+  ownerId: string;
+  status: 'setup' | 'active' | 'completed';
+  createdAt: Timestamp;
+}
+
+export interface Player {
+  id: string;
+  name: string;
+  points: number;
+  gamesPlayed: number;
+  wins: number;
+  addedAt: Timestamp;
+}
+
+export interface Match {
+  id: string;
+  round: number;
+  team1: string[]; // Player IDs
+  team2: string[]; // Player IDs
+  score1: number;
+  score2: number;
+  status: 'pending' | 'completed';
+  updatedAt: Timestamp;
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: 'create' | 'update' | 'delete' | 'list' | 'get' | 'write';
+  path: string | null;
+  authInfo: {
+    userId: string;
+    email: string;
+    emailVerified: boolean;
+    isAnonymous: boolean;
+    providerInfo: any[];
+  }
+}
+
+export const handleFirestoreError = (error: any, operationType: string, path: string | null = null): never => {
+  const user = auth.currentUser;
+  const errorInfo: FirestoreErrorInfo = {
+    error: error.message || 'Unknown Firestore error',
+    operationType: operationType as any,
+    path,
+    authInfo: {
+      userId: user?.uid || 'unauthenticated',
+      email: user?.email || '',
+      emailVerified: user?.emailVerified || false,
+      isAnonymous: user?.isAnonymous || false,
+      providerInfo: user?.providerData || []
+    }
+  };
+  throw new Error(JSON.stringify(errorInfo));
+};

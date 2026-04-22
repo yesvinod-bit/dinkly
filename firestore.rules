@@ -1,0 +1,147 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(tournamentId) {
+      return isSignedIn() && get(/databases/$(database)/documents/tournaments/$(tournamentId)).data.ownerId == request.auth.uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && 
+             request.auth.token.email_verified == true && 
+             request.auth.token.email == 'yes.vinod@gmail.com';
+    }
+
+    function isValidId(id) {
+       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    match /tournaments/{tournamentId} {
+      function isValidTournament(data) {
+        return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+               data.code is string && data.code.size() == 6 &&
+               data.ownerId == request.auth.uid &&
+               data.status in ['setup', 'active', 'completed'] &&
+               data.createdAt is timestamp;
+      }
+
+      allow get: if true;
+      allow list: if true; // Queries by code or ownerId
+
+      allow create: if isSignedIn() && isValidTournament(incoming()) && incoming().createdAt == request.time;
+      
+      allow update: if isOwner(tournamentId) && isValidTournament(incoming()) && 
+                    incoming().ownerId == existing().ownerId &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().code == existing().code && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'status', 'updatedAt']) ||
+        incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+      );
+
+      // Players Subcollection
+      match /players/{playerId} {
+        function isValidPlayer(data) {
+          return data.name is string && data.name.size() > 0 && data.name.size() <= 50 &&
+                 data.points is number && data.gamesPlayed is number &&
+                 data.wins is number && data.addedAt is timestamp;
+        }
+
+        allow read: if true;
+        allow create: if isOwner(tournamentId) && isValidPlayer(incoming()) && incoming().addedAt == request.time;
+        allow delete: if isOwner(tournamentId) &&
+                      get(/databases/$(database)/documents/tournaments/$(tournamentId)).data.status == 'setup';
+        allow update: if isSignedIn() && isValidPlayer(incoming()) && 
+                      incoming().name == existing().name &&
+                      incoming().addedAt == existing().addedAt && (
+          // Update after match score is entered
+          incoming().diff(existing()).affectedKeys().hasAny(['points', 'gamesPlayed', 'wins']) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['points', 'gamesPlayed', 'wins'])
+        );
+      }
+
+      // Matches Subcollection
+      match /matches/{matchId} {
+        function isValidMatch(data) {
+          return data.round is number &&
+                 data.team1 is list && data.team1.size() == 2 &&
+                 data.team2 is list && data.team2.size() == 2 &&
+                 data.score1 is number && data.score2 is number &&
+                 data.status in ['pending', 'completed'] &&
+                 data.updatedAt is timestamp;
+        }
+
+        allow read: if true;
+        allow create: if isOwner(tournamentId) && isValidMatch(incoming());
+        allow update: if isSignedIn() && isValidMatch(incoming()) && 
+                      incoming().team1 == existing().team1 &&
+                      incoming().team2 == existing().team2 &&
+                      incoming().round == existing().round && (
+          // Action: Enter Score
+          (existing().status == 'pending' && incoming().status == 'completed' &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['score1', 'score2', 'status', 'updatedAt'])) ||
+          // Owner can override
+          isOwner(tournamentId)
+        );
+      }
+    }
+
+    // User History Collection
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      
+      match /tournaments/{tournamentId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow write: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+
+    // Global logins for notifications
+    match /logins/{loginId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && 
+                    incoming().uid == request.auth.uid &&
+                    incoming().timestamp == request.time &&
+                    incoming().displayName is string;
+    }
+
+    // Membership & Invites System
+    match /inviteCodes/{codeId} {
+      allow read: if isSignedIn(); // Users check validity
+      allow create: if isAdmin();
+      allow delete: if isAdmin();
+      allow update: if isAdmin() || (
+        isSignedIn() && 
+        incoming().currentUses == existing().currentUses + 1 &&
+        incoming().claimedBy.size() == existing().claimedBy.size() + 1 &&
+        incoming().claimedBy.hasAll([request.auth.uid]) &&
+        incoming().currentUses <= existing().maxUses
+      );
+    }
+
+    match /memberships/{userId} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow create: if isSignedIn() && request.auth.uid == userId && 
+                    incoming().status == 'active' &&
+                    incoming().joinedAt == request.time;
+      allow update: if isAdmin(); 
+    }
+  }
+}

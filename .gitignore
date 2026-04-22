@@ -1,0 +1,12 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.firebase/
+.config/
+.env*
+!.env.example
+firebase-applet-config.json
+firebase-debug.log
