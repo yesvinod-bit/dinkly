@@ -157,7 +157,16 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
       const batch = writeBatch(db);
       roundMatches.forEach(m => {
         const ref = doc(collection(db, 'tournaments', tournamentId, 'matches'));
-        batch.set(ref, { ...m, updatedAt: serverTimestamp(), completedAt: null });
+        batch.set(ref, {
+          ...m,
+          updatedAt: serverTimestamp(),
+          completedAt: null,
+          voidedAt: null,
+          statusBeforeVoid: null,
+          previousScore1: null,
+          previousScore2: null,
+          previousCompletedAt: null,
+        });
       });
       await batch.commit();
     } catch (e) {
