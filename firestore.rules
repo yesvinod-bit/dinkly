@@ -12,18 +12,54 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isRegisteredUser() {
+      return isSignedIn() &&
+             (!request.auth.token.firebase.keys().hasAny(['sign_in_provider']) ||
+              request.auth.token.firebase.sign_in_provider != 'anonymous');
+    }
+
     function isOwner(tournamentId) {
-      return isSignedIn() && get(/databases/$(database)/documents/tournaments/$(tournamentId)).data.ownerId == request.auth.uid;
+      return isRegisteredUser() && get(/databases/$(database)/documents/tournaments/$(tournamentId)).data.ownerId == request.auth.uid;
     }
 
     function isAdmin() {
-      return isSignedIn() && 
+      return isRegisteredUser() && 
              request.auth.token.email_verified == true && 
              request.auth.token.email == 'yes.vinod@gmail.com';
     }
 
     function isValidId(id) {
        return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function tournamentPath(tournamentId) {
+      return /databases/$(database)/documents/tournaments/$(tournamentId);
+    }
+
+    function tournamentDoc(tournamentId) {
+      return get(tournamentPath(tournamentId)).data;
+    }
+
+    function tournamentExists(tournamentId) {
+      return exists(tournamentPath(tournamentId));
+    }
+
+    function tournamentStatus(tournamentId) {
+      return tournamentDoc(tournamentId).status;
+    }
+
+    function tournamentMemberPath(tournamentId) {
+      return /databases/$(database)/documents/users/$(request.auth.uid)/tournaments/$(tournamentId);
+    }
+
+    function isTournamentMember(tournamentId) {
+      return isRegisteredUser() && exists(tournamentMemberPath(tournamentId));
+    }
+
+    function tournamentFormat(tournamentId) {
+      return tournamentExists(tournamentId) && tournamentDoc(tournamentId).format == 'singles'
+        ? 'singles'
+        : 'doubles';
     }
 
     function incoming() {
@@ -35,40 +71,80 @@ service cloud.firestore {
     }
 
     match /tournaments/{tournamentId} {
-      function isValidTournament(data) {
-        return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-               data.code is string && data.code.size() == 6 &&
+      function isValidTournamentDocument(data) {
+        return data.keys().hasAll(['name', 'code', 'ownerId', 'status', 'createdAt']) &&
+               data.keys().hasOnly(['name', 'code', 'ownerId', 'format', 'status', 'createdAt', 'updatedAt']) &&
+               data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+               data.code is string && data.code.matches('^[A-Z0-9]{6}$') &&
                data.ownerId == request.auth.uid &&
+               (!data.keys().hasAny(['format']) || data.format in ['singles', 'doubles']) &&
                data.status in ['setup', 'active', 'completed'] &&
-               data.createdAt is timestamp;
+               data.createdAt is timestamp &&
+               (!data.keys().hasAny(['updatedAt']) || data.updatedAt is timestamp);
+      }
+
+      function isValidTournamentStatusTransition(before, after) {
+        return before == after ||
+               (before == 'setup' && after == 'active') ||
+               (before == 'active' && after == 'completed');
       }
 
       allow get: if true;
-      allow list: if true; // Queries by code or ownerId
+      allow list: if isRegisteredUser(); // Queries by code or ownerId
 
-      allow create: if isSignedIn() && isValidTournament(incoming()) && incoming().createdAt == request.time;
+      allow create: if isValidId(tournamentId) &&
+                    isRegisteredUser() &&
+                    isValidTournamentDocument(incoming()) &&
+                    incoming().status == 'setup' &&
+                    incoming().createdAt == request.time &&
+                    (!incoming().keys().hasAny(['updatedAt']) || incoming().updatedAt == request.time);
       
-      allow update: if isOwner(tournamentId) && isValidTournament(incoming()) && 
+      allow update: if isValidId(tournamentId) &&
+                    tournamentExists(tournamentId) &&
+                    isOwner(tournamentId) &&
+                    isValidTournamentDocument(incoming()) && 
                     incoming().ownerId == existing().ownerId &&
                     incoming().createdAt == existing().createdAt &&
-                    incoming().code == existing().code && (
-        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'status', 'updatedAt']) ||
-        incoming().diff(existing()).affectedKeys().hasOnly(['status'])
-      );
+                    incoming().code == existing().code &&
+                    incoming().format == existing().format &&
+                    isValidTournamentStatusTransition(existing().status, incoming().status) &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'status', 'updatedAt']) &&
+                    (!incoming().diff(existing()).affectedKeys().hasAny(['updatedAt']) || incoming().updatedAt == request.time);
 
       // Players Subcollection
       match /players/{playerId} {
-        function isValidPlayer(data) {
-          return data.name is string && data.name.size() > 0 && data.name.size() <= 50 &&
-                 data.points is number && data.gamesPlayed is number &&
-                 data.wins is number && data.addedAt is timestamp;
+        function isValidPlayerDocument(data) {
+          return data.keys().hasAll(['name', 'points', 'gamesPlayed', 'wins', 'addedAt']) &&
+                 data.keys().hasOnly(['name', 'points', 'gamesPlayed', 'wins', 'addedAt']) &&
+                 data.name is string && data.name.size() > 0 && data.name.size() <= 50 &&
+                 data.points is number &&
+                 data.gamesPlayed is number && data.gamesPlayed >= 0 &&
+                 data.wins is number && data.wins >= 0 && data.wins <= data.gamesPlayed &&
+                 data.addedAt is timestamp;
         }
 
         allow read: if true;
-        allow create: if isOwner(tournamentId) && isValidPlayer(incoming()) && incoming().addedAt == request.time;
-        allow delete: if isOwner(tournamentId) &&
-                      get(/databases/$(database)/documents/tournaments/$(tournamentId)).data.status == 'setup';
-        allow update: if isSignedIn() && isValidPlayer(incoming()) && 
+        allow create: if isValidId(tournamentId) &&
+                      isValidId(playerId) &&
+                      tournamentExists(tournamentId) &&
+                      isTournamentMember(tournamentId) &&
+                      tournamentStatus(tournamentId) == 'setup' &&
+                      isValidPlayerDocument(incoming()) &&
+                      incoming().points == 0 &&
+                      incoming().gamesPlayed == 0 &&
+                      incoming().wins == 0 &&
+                      incoming().addedAt == request.time;
+        allow delete: if isValidId(tournamentId) &&
+                      isValidId(playerId) &&
+                      tournamentExists(tournamentId) &&
+                      isOwner(tournamentId) &&
+                      tournamentStatus(tournamentId) == 'setup';
+        allow update: if isValidId(tournamentId) &&
+                      isValidId(playerId) &&
+                      tournamentExists(tournamentId) &&
+                      isOwner(tournamentId) &&
+                      tournamentStatus(tournamentId) in ['active', 'completed'] &&
+                      isValidPlayerDocument(incoming()) && 
                       incoming().name == existing().name &&
                       incoming().addedAt == existing().addedAt && (
           // Update after match score is entered
@@ -79,44 +155,251 @@ service cloud.firestore {
 
       // Matches Subcollection
       match /matches/{matchId} {
-        function isValidMatch(data) {
-          return data.round is number &&
-                 data.team1 is list && data.team1.size() == 2 &&
-                 data.team2 is list && data.team2.size() == 2 &&
-                 data.score1 is number && data.score2 is number &&
-                 data.status in ['pending', 'completed'] &&
+        function hasUniqueTeamMembers(team) {
+          return team.size() == 1 || team[0] != team[1];
+        }
+
+        function hasCompletedAtField(data) {
+          return data.keys().hasAny(['completedAt']);
+        }
+
+        function hasVoidedAtField(data) {
+          return data.keys().hasAny(['voidedAt']);
+        }
+
+        function hasStatusBeforeVoidField(data) {
+          return data.keys().hasAny(['statusBeforeVoid']);
+        }
+
+        function hasPreviousScore1Field(data) {
+          return data.keys().hasAny(['previousScore1']);
+        }
+
+        function hasPreviousScore2Field(data) {
+          return data.keys().hasAny(['previousScore2']);
+        }
+
+        function hasPreviousCompletedAtField(data) {
+          return data.keys().hasAny(['previousCompletedAt']);
+        }
+
+        function isValidTeam(team) {
+          return team is list &&
+                 team.size() == (tournamentFormat(tournamentId) == 'singles' ? 1 : 2) &&
+                 hasUniqueTeamMembers(team);
+        }
+
+        function isValidCompletedAt(data) {
+          return !hasCompletedAtField(data) || data.completedAt == null || data.completedAt is timestamp;
+        }
+
+        function isValidVoidedAt(data) {
+          return !hasVoidedAtField(data) || data.voidedAt == null || data.voidedAt is timestamp;
+        }
+
+        function isValidStatusBeforeVoid(data) {
+          return !hasStatusBeforeVoidField(data) ||
+                 data.statusBeforeVoid == null ||
+                 data.statusBeforeVoid in ['pending', 'completed'];
+        }
+
+        function isValidPreviousScore1(data) {
+          return !hasPreviousScore1Field(data) ||
+                 data.previousScore1 == null ||
+                 (data.previousScore1 is number && data.previousScore1 >= 0);
+        }
+
+        function isValidPreviousScore2(data) {
+          return !hasPreviousScore2Field(data) ||
+                 data.previousScore2 == null ||
+                 (data.previousScore2 is number && data.previousScore2 >= 0);
+        }
+
+        function isValidPreviousCompletedAt(data) {
+          return !hasPreviousCompletedAtField(data) ||
+                 data.previousCompletedAt == null ||
+                 data.previousCompletedAt is timestamp;
+        }
+
+        function isValidScoresForStatus(data) {
+          return (data.status == 'pending' &&
+                  data.score1 == 0 &&
+                  data.score2 == 0 &&
+                  (!hasCompletedAtField(data) || data.completedAt == null)) ||
+                 (data.status == 'void' &&
+                  data.score1 == 0 &&
+                  data.score2 == 0 &&
+                  (!hasCompletedAtField(data) || data.completedAt == null)) ||
+                 (data.status == 'completed' &&
+                  data.score1 is number && data.score1 >= 0 &&
+                  data.score2 is number && data.score2 >= 0 &&
+                  data.score1 != data.score2 &&
+                  hasCompletedAtField(data) &&
+                  data.completedAt is timestamp);
+        }
+
+        function isValidMatchDocument(data) {
+          return data.keys().hasAll(['round', 'team1', 'team2', 'score1', 'score2', 'status', 'updatedAt']) &&
+                 data.keys().hasOnly([
+                   'round',
+                   'team1',
+                   'team2',
+                   'score1',
+                   'score2',
+                   'status',
+                   'updatedAt',
+                   'completedAt',
+                   'voidedAt',
+                   'statusBeforeVoid',
+                   'previousScore1',
+                   'previousScore2',
+                   'previousCompletedAt'
+                 ]) &&
+                 data.round is number && data.round >= 1 &&
+                 isValidTeam(data.team1) &&
+                 isValidTeam(data.team2) &&
+                 !data.team1.hasAny(data.team2) &&
+                 data.status in ['pending', 'completed', 'void'] &&
+                 isValidCompletedAt(data) &&
+                 isValidVoidedAt(data) &&
+                 isValidStatusBeforeVoid(data) &&
+                 isValidPreviousScore1(data) &&
+                 isValidPreviousScore2(data) &&
+                 isValidPreviousCompletedAt(data) &&
+                 isValidScoresForStatus(data) &&
                  data.updatedAt is timestamp;
         }
 
         allow read: if true;
-        allow create: if isOwner(tournamentId) && isValidMatch(incoming());
-        allow update: if isSignedIn() && isValidMatch(incoming()) && 
+        allow create: if isValidId(tournamentId) &&
+                      isValidId(matchId) &&
+                      tournamentExists(tournamentId) &&
+                      isOwner(tournamentId) &&
+                      tournamentStatus(tournamentId) == 'active' &&
+                      isValidMatchDocument(incoming()) &&
+                      incoming().status == 'pending' &&
+                      incoming().updatedAt == request.time &&
+                      (!incoming().keys().hasAny(['voidedAt']) || incoming().voidedAt == null) &&
+                      (!incoming().keys().hasAny(['statusBeforeVoid']) || incoming().statusBeforeVoid == null) &&
+                      (!incoming().keys().hasAny(['previousScore1']) || incoming().previousScore1 == null) &&
+                      (!incoming().keys().hasAny(['previousScore2']) || incoming().previousScore2 == null) &&
+                      (!incoming().keys().hasAny(['previousCompletedAt']) || incoming().previousCompletedAt == null);
+        allow update: if isValidId(tournamentId) &&
+                      isValidId(matchId) &&
+                      tournamentExists(tournamentId) &&
+                      isOwner(tournamentId) &&
+                      isValidMatchDocument(incoming()) && 
                       incoming().team1 == existing().team1 &&
                       incoming().team2 == existing().team2 &&
                       incoming().round == existing().round && (
           // Action: Enter Score
-          (existing().status == 'pending' && incoming().status == 'completed' &&
-           incoming().diff(existing()).affectedKeys().hasOnly(['score1', 'score2', 'status', 'updatedAt'])) ||
-          // Owner can override
-          isOwner(tournamentId)
+          (existing().status == 'pending' &&
+           incoming().status == 'completed' &&
+           incoming().updatedAt == request.time &&
+           incoming().completedAt == request.time &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['score1', 'score2', 'status', 'updatedAt', 'completedAt'])) ||
+          // Owner can override a completed score
+          (existing().status == 'completed' &&
+           incoming().status == 'completed' &&
+           incoming().updatedAt == request.time &&
+           incoming().completedAt == request.time &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['score1', 'score2', 'updatedAt', 'completedAt'])) ||
+          // Owner can undo a completed score
+          (existing().status == 'completed' &&
+           incoming().status == 'pending' &&
+           incoming().updatedAt == request.time &&
+           incoming().completedAt == null &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['score1', 'score2', 'status', 'updatedAt', 'completedAt'])) ||
+          // Owner can void any pending or completed match
+          (existing().status in ['pending', 'completed'] &&
+           incoming().status == 'void' &&
+           incoming().score1 == 0 &&
+           incoming().score2 == 0 &&
+           incoming().completedAt == null &&
+           incoming().voidedAt == request.time &&
+           incoming().statusBeforeVoid == existing().status &&
+           incoming().previousScore1 == existing().score1 &&
+           incoming().previousScore2 == existing().score2 &&
+           incoming().previousCompletedAt == existing().completedAt &&
+           incoming().updatedAt == request.time &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'score1',
+             'score2',
+             'status',
+             'updatedAt',
+             'completedAt',
+             'voidedAt',
+             'statusBeforeVoid',
+             'previousScore1',
+             'previousScore2',
+             'previousCompletedAt'
+           ])) ||
+          // Owner can restore a voided pending match
+          (existing().status == 'void' &&
+           existing().statusBeforeVoid == 'pending' &&
+           incoming().status == 'pending' &&
+           incoming().score1 == 0 &&
+           incoming().score2 == 0 &&
+           incoming().completedAt == null &&
+           incoming().voidedAt == null &&
+           incoming().statusBeforeVoid == null &&
+           incoming().previousScore1 == null &&
+           incoming().previousScore2 == null &&
+           incoming().previousCompletedAt == null &&
+           incoming().updatedAt == request.time &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'status',
+             'updatedAt',
+             'voidedAt',
+             'statusBeforeVoid',
+             'previousScore1',
+             'previousScore2',
+             'previousCompletedAt'
+           ])) ||
+          // Owner can restore a voided completed match
+          (existing().status == 'void' &&
+           existing().statusBeforeVoid == 'completed' &&
+           incoming().status == 'completed' &&
+           incoming().score1 == existing().previousScore1 &&
+           incoming().score2 == existing().previousScore2 &&
+           incoming().completedAt is timestamp &&
+           (incoming().completedAt == existing().previousCompletedAt || incoming().completedAt == request.time) &&
+           incoming().voidedAt == null &&
+           incoming().statusBeforeVoid == null &&
+           incoming().previousScore1 == null &&
+           incoming().previousScore2 == null &&
+           incoming().previousCompletedAt == null &&
+           incoming().updatedAt == request.time &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'score1',
+             'score2',
+             'status',
+             'updatedAt',
+             'completedAt',
+             'voidedAt',
+             'statusBeforeVoid',
+             'previousScore1',
+             'previousScore2',
+             'previousCompletedAt'
+           ]))
         );
       }
     }
 
     // User History Collection
     match /users/{userId} {
-      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow read: if isRegisteredUser() && request.auth.uid == userId;
       
       match /tournaments/{tournamentId} {
-        allow read: if isSignedIn() && request.auth.uid == userId;
-        allow write: if isSignedIn() && request.auth.uid == userId;
+        allow read: if isRegisteredUser() && request.auth.uid == userId;
+        allow write: if isRegisteredUser() && request.auth.uid == userId;
       }
     }
 
     // Global logins for notifications
     match /logins/{loginId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && 
+      allow get, list: if isAdmin();
+      allow create: if isRegisteredUser() && 
                     incoming().uid == request.auth.uid &&
                     incoming().timestamp == request.time &&
                     incoming().displayName is string;
@@ -124,21 +407,34 @@ service cloud.firestore {
 
     // Membership & Invites System
     match /inviteCodes/{codeId} {
-      allow read: if isSignedIn(); // Users check validity
+      allow read: if isRegisteredUser(); // Users check validity
       allow create: if isAdmin();
       allow delete: if isAdmin();
       allow update: if isAdmin() || (
-        isSignedIn() && 
+        isValidId(codeId) &&
+        isRegisteredUser() &&
+        incoming().code == existing().code &&
+        incoming().maxUses == existing().maxUses &&
+        incoming().createdAt == existing().createdAt &&
         incoming().currentUses == existing().currentUses + 1 &&
+        incoming().currentUses <= existing().maxUses &&
         incoming().claimedBy.size() == existing().claimedBy.size() + 1 &&
-        incoming().claimedBy.hasAll([request.auth.uid]) &&
-        incoming().currentUses <= existing().maxUses
+        !existing().claimedBy.hasAny([request.auth.uid]) &&
+        incoming().claimedBy.hasAll(existing().claimedBy) &&
+        incoming().claimedBy.hasAll([request.auth.uid])
       );
     }
 
     match /memberships/{userId} {
-      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
-      allow create: if isSignedIn() && request.auth.uid == userId && 
+      allow read: if isAdmin() || (isRegisteredUser() && request.auth.uid == userId);
+      allow create: if isValidId(userId) &&
+                    isRegisteredUser() &&
+                    request.auth.uid == userId && 
+                    incoming().keys().hasAll(['status', 'joinedAt']) &&
+                    incoming().keys().hasOnly(['email', 'displayName', 'inviteCodeId', 'status', 'joinedAt']) &&
+                    (!incoming().keys().hasAny(['email']) || incoming().email is string) &&
+                    (!incoming().keys().hasAny(['displayName']) || incoming().displayName is string) &&
+                    (!incoming().keys().hasAny(['inviteCodeId']) || incoming().inviteCodeId is string) &&
                     incoming().status == 'active' &&
                     incoming().joinedAt == request.time;
       allow update: if isAdmin(); 
