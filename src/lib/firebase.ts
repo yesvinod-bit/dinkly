@@ -103,12 +103,12 @@ export const getReadableFirestoreError = (error: unknown, fallback: string): str
   try {
     const parsed = JSON.parse(error.message) as FirestoreErrorInfo;
     if (parsed.error.includes('Missing or insufficient permissions')) {
-      return 'You do not have access for that action yet. Join the tournament first, or ask the owner to try again.';
+      return 'You do not have permission for that action. If you are the tournament creator, refresh once and try again.';
     }
     return parsed.error || fallback;
   } catch {
     if (error.message.includes('Missing or insufficient permissions')) {
-      return 'You do not have access for that action yet. Join the tournament first, or ask the owner to try again.';
+      return 'You do not have permission for that action. If you are the tournament creator, refresh once and try again.';
     }
     return error.message || fallback;
   }
