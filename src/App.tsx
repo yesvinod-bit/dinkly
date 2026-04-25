@@ -21,7 +21,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db, signIn, logout, Tournament, TournamentFormat, handleFirestoreError } from './lib/firebase';
 import { DEFAULT_TOURNAMENT_FORMAT, generateCode, getTournamentFormat, getTournamentFormatTag } from './lib/tournamentLogic';
-import { Trophy, Users, Plus, Hash, LogOut, ChevronRight, History, Calendar, Bell, X, Shield, Loader2, CheckSquare, Square, Trash2 } from 'lucide-react';
+import { Trophy, Users, Plus, Hash, LogOut, ChevronRight, History, Calendar, Bell, X, Shield, Loader2, CheckSquare, Square, Trash2, BadgeCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Lazy load heavy components
@@ -45,6 +45,41 @@ interface HistoryItem {
   role: 'owner' | 'player';
   format?: TournamentFormat;
   joinedAt: any;
+}
+
+interface ClaimedTournamentProfile {
+  tournamentId: string;
+  tournamentName: string;
+  tournamentCode: string;
+  tournamentFormat: TournamentFormat;
+  tournamentStatus: Tournament['status'];
+  playerName: string;
+  points: number;
+  gamesPlayed: number;
+  wins: number;
+  claimedAt?: Timestamp;
+  joinedAt?: Timestamp;
+}
+
+interface FormatStatsSummary {
+  tournaments: number;
+  games: number;
+  wins: number;
+  points: number;
+  winRate: number;
+}
+
+interface PlayerProfileSummary {
+  displayName: string;
+  claimedTournamentCount: number;
+  activeTournamentCount: number;
+  completedTournamentCount: number;
+  totalGames: number;
+  totalWins: number;
+  totalPoints: number;
+  winRate: number;
+  formatBreakdown: Record<TournamentFormat, FormatStatsSummary>;
+  recentClaimedTournaments: ClaimedTournamentProfile[];
 }
 
 interface LoginEvent {
@@ -109,10 +144,16 @@ export default function App() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<LoginEvent[]>([]);
-  const [guestModeId, setGuestModeId] = useState<string | null>(null);
+  const [sharedTournamentId, setSharedTournamentId] = useState<string | null>(null);
   const [isHistorySelectionMode, setIsHistorySelectionMode] = useState(false);
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([]);
   const [isClearingHistory, setIsClearingHistory] = useState(false);
+  const [playerProfile, setPlayerProfile] = useState<PlayerProfileSummary | null>(null);
+  const [isPlayerProfileLoading, setIsPlayerProfileLoading] = useState(false);
+  const [playerProfileError, setPlayerProfileError] = useState<string | null>(null);
+  const [isPlayerProfileOpen, setIsPlayerProfileOpen] = useState(false);
+  const [selectedProfileFormat, setSelectedProfileFormat] = useState<TournamentFormat>('doubles');
+  const [isJoiningSharedTournament, setIsJoiningSharedTournament] = useState(false);
   const historyFormatCacheRef = useRef(new Map<string, TournamentFormat>());
 
   const adminEmail = 'yes.vinod@gmail.com';
@@ -164,14 +205,144 @@ export default function App() {
     );
 
     setHistory(historyWithFormats);
+    return historyWithFormats;
+  };
+
+  const loadPlayerProfile = async (uid: string, historyItems: HistoryItem[]) => {
+    setIsPlayerProfileLoading(true);
+    setPlayerProfileError(null);
+
+    try {
+      const historyByTournamentId = new Map(historyItems.map((item) => [item.id, item]));
+      const claimedProfiles = (await Promise.all(
+        historyItems.map(async (historyEntry) => {
+          const tournamentId = historyEntry.id;
+          const playersSnap = await getDocs(collection(db, 'tournaments', tournamentId, 'players'));
+          const playerDoc = playersSnap.docs.find((docSnap) => docSnap.data().claimedByUserId === uid);
+
+          if (!playerDoc) return null;
+
+          const player = playerDoc.data();
+
+          const historyItem = historyByTournamentId.get(tournamentId);
+          let tournamentName = historyItem?.name || 'Tournament';
+          let tournamentCode = historyItem?.code || '------';
+          let tournamentFormat = getTournamentFormat(historyItem?.format);
+          let tournamentStatus: Tournament['status'] = 'setup';
+          let joinedAt = historyItem?.joinedAt as Timestamp | undefined;
+          let points = 0;
+          let gamesPlayed = 0;
+          let wins = 0;
+
+          try {
+            const tournamentSnap = await getDoc(doc(db, 'tournaments', tournamentId));
+            if (tournamentSnap.exists()) {
+              const tournamentData = tournamentSnap.data() as Tournament;
+              tournamentName = tournamentData.name;
+              tournamentCode = tournamentData.code;
+              tournamentFormat = getTournamentFormat(tournamentData.format);
+              tournamentStatus = tournamentData.status;
+              joinedAt = historyItem?.joinedAt as Timestamp | undefined || tournamentData.createdAt;
+            }
+          } catch (error) {
+            console.error('Claimed tournament lookup failed:', error);
+          }
+
+          try {
+            const matchesSnap = await getDocs(collection(db, 'tournaments', tournamentId, 'matches'));
+            matchesSnap.docs.forEach((matchDoc) => {
+              const match = matchDoc.data();
+              if (match.status !== 'completed') return;
+
+              const isTeam1 = Array.isArray(match.team1) && match.team1.includes(playerDoc.id);
+              const isTeam2 = Array.isArray(match.team2) && match.team2.includes(playerDoc.id);
+              if (!isTeam1 && !isTeam2) return;
+
+              gamesPlayed += 1;
+              const scoreFor = isTeam1 ? match.score1 : match.score2;
+              const scoreAgainst = isTeam1 ? match.score2 : match.score1;
+              if (scoreFor > scoreAgainst) {
+                wins += 1;
+              }
+              points += scoreFor - scoreAgainst;
+            });
+          } catch (error) {
+            console.error('Claimed tournament match lookup failed:', error);
+          }
+
+          return {
+            tournamentId,
+            tournamentName,
+            tournamentCode,
+            tournamentFormat,
+            tournamentStatus,
+            playerName: player.name || 'Player',
+            points,
+            gamesPlayed,
+            wins,
+            claimedAt: player.claimedAt as Timestamp | undefined,
+            joinedAt,
+          } as ClaimedTournamentProfile;
+        })
+      )).filter((item): item is ClaimedTournamentProfile => item !== null);
+
+      claimedProfiles.sort((a, b) => {
+        const aMs = a.claimedAt?.toMillis?.() ?? a.joinedAt?.toMillis?.() ?? 0;
+        const bMs = b.claimedAt?.toMillis?.() ?? b.joinedAt?.toMillis?.() ?? 0;
+        return bMs - aMs;
+      });
+
+      const totalGames = claimedProfiles.reduce((sum, item) => sum + item.gamesPlayed, 0);
+      const totalWins = claimedProfiles.reduce((sum, item) => sum + item.wins, 0);
+      const totalPoints = claimedProfiles.reduce((sum, item) => sum + item.points, 0);
+      const activeTournamentCount = claimedProfiles.filter((item) => item.tournamentStatus === 'active').length;
+      const completedTournamentCount = claimedProfiles.filter((item) => item.tournamentStatus === 'completed').length;
+      const formatBreakdown = {
+        doubles: { tournaments: 0, games: 0, wins: 0, points: 0, winRate: 0 },
+        singles: { tournaments: 0, games: 0, wins: 0, points: 0, winRate: 0 },
+      } satisfies Record<TournamentFormat, FormatStatsSummary>;
+
+      claimedProfiles.forEach((item) => {
+        const current = formatBreakdown[item.tournamentFormat];
+        current.tournaments += 1;
+        current.games += item.gamesPlayed;
+        current.wins += item.wins;
+        current.points += item.points;
+      });
+
+      (Object.keys(formatBreakdown) as TournamentFormat[]).forEach((formatKey) => {
+        const current = formatBreakdown[formatKey];
+        current.winRate = current.games > 0 ? Math.round((current.wins / current.games) * 100) : 0;
+      });
+
+      setPlayerProfile({
+        displayName: claimedProfiles[0]?.playerName || getUserLabel(auth.currentUser as User),
+        claimedTournamentCount: claimedProfiles.length,
+        activeTournamentCount,
+        completedTournamentCount,
+        totalGames,
+        totalWins,
+        totalPoints,
+        winRate: totalGames > 0 ? Math.round((totalWins / totalGames) * 100) : 0,
+        formatBreakdown,
+        recentClaimedTournaments: claimedProfiles.slice(0, 3),
+      });
+      setIsPlayerProfileOpen((prev) => prev && claimedProfiles.length > 0);
+    } catch (error) {
+      console.error('Player profile load failed:', error);
+      setPlayerProfile(null);
+      setIsPlayerProfileOpen(false);
+      setPlayerProfileError('Unable to load your player profile right now.');
+    } finally {
+      setIsPlayerProfileLoading(false);
+    }
   };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const viewParam = params.get('view');
     if (viewParam) {
-      setGuestModeId(viewParam);
-      setLoading(false);
+      setSharedTournamentId(viewParam);
     }
 
     return onAuthStateChanged(auth, async (u) => {
@@ -193,6 +364,9 @@ export default function App() {
         setHistory([]);
         setSelectedHistoryIds([]);
         setIsHistorySelectionMode(false);
+        setPlayerProfile(null);
+        setPlayerProfileError(null);
+        setIsPlayerProfileOpen(false);
         setLoading(false);
       }
     });
@@ -226,12 +400,17 @@ export default function App() {
 
   useEffect(() => {
     if (!user || !isVerified) return;
-    if (activeTournamentId || isAdminMode) return;
+    if (activeTournamentId || sharedTournamentId || isAdminMode) return;
 
-    void loadUserHistory(user.uid).catch((err) => {
-      console.error('History load error:', err);
-      setLoading(false);
-    });
+    void (async () => {
+      try {
+        const historyItems = await loadUserHistory(user.uid);
+        await loadPlayerProfile(user.uid, historyItems);
+      } catch (err) {
+        console.error('History load error:', err);
+        setLoading(false);
+      }
+    })();
 
     let unsubLogins: (() => void) | undefined;
 
@@ -267,7 +446,64 @@ export default function App() {
     return () => {
       unsubLogins?.();
     };
-  }, [user, isVerified, isAdminMode, activeTournamentId]);
+  }, [user, isVerified, isAdminMode, activeTournamentId, sharedTournamentId]);
+
+  useEffect(() => {
+    if (!user || !isVerified || !sharedTournamentId) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      setIsJoiningSharedTournament(true);
+
+      try {
+        const membershipSnap = await getDoc(doc(db, 'users', user.uid, 'tournaments', sharedTournamentId));
+        if (membershipSnap.exists() || cancelled) {
+          return;
+        }
+
+        const tournamentSnap = await getDoc(doc(db, 'tournaments', sharedTournamentId));
+        if (!tournamentSnap.exists() || cancelled) {
+          return;
+        }
+
+        const tournamentData = tournamentSnap.data() as Tournament;
+        await recordTournamentJoin(
+          sharedTournamentId,
+          tournamentData.name,
+          tournamentData.code,
+          tournamentData.ownerId === user.uid ? 'owner' : 'player',
+          tournamentData.format
+        );
+      } catch (error) {
+        console.error('Shared tournament join failed:', error);
+      } finally {
+        if (!cancelled) {
+          setIsJoiningSharedTournament(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isVerified, sharedTournamentId]);
+
+  useEffect(() => {
+    if (!playerProfile) return;
+
+    const doublesHasData = playerProfile.formatBreakdown.doubles.tournaments > 0;
+    const singlesHasData = playerProfile.formatBreakdown.singles.tournaments > 0;
+
+    if (doublesHasData) {
+      setSelectedProfileFormat('doubles');
+      return;
+    }
+
+    if (singlesHasData) {
+      setSelectedProfileFormat('singles');
+    }
+  }, [playerProfile]);
 
   const recordTournamentJoin = async (
     tId: string,
@@ -392,14 +628,14 @@ export default function App() {
     }
   };
 
-  if (guestModeId) {
+  if (sharedTournamentId && !user) {
     return (
       <Suspense fallback={<LoadingOverlay />}>
         <TournamentDashboard 
-          tournamentId={guestModeId} 
+          tournamentId={sharedTournamentId} 
           readOnly={true}
           onBack={() => {
-            setGuestModeId(null);
+            setSharedTournamentId(null);
             const newUrl = window.location.pathname;
             window.history.replaceState({}, '', newUrl);
           }} 
@@ -471,6 +707,26 @@ export default function App() {
     );
   }
 
+  if (sharedTournamentId && isJoiningSharedTournament) {
+    return <LoadingOverlay />;
+  }
+
+  if (sharedTournamentId) {
+    return (
+      <Suspense fallback={<LoadingOverlay />}>
+        <TournamentDashboard
+          tournamentId={sharedTournamentId}
+          readOnly={false}
+          onBack={() => {
+            setSharedTournamentId(null);
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, '', newUrl);
+          }}
+        />
+      </Suspense>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-lime-50 p-3 md:p-8">
       {/* Notifications Overlay */}
@@ -517,6 +773,15 @@ export default function App() {
             </p>
           </div>
           <div className="flex gap-2">
+            <button
+              onClick={() => setIsPlayerProfileOpen((prev) => !prev)}
+              className={`p-2 md:p-3 border-2 md:border-4 border-slate-800 rounded-xl md:rounded-2xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] md:shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] transition-all ${
+                isPlayerProfileOpen ? 'bg-sky-400 text-slate-900' : 'bg-white text-slate-800'
+              }`}
+              title="My Profile"
+            >
+              <BadgeCheck className="w-4 h-4 md:w-5 md:h-5" />
+            </button>
             {user.email === adminEmail && (
               <button 
                 onClick={() => setIsAdminMode(!isAdminMode)}
@@ -541,6 +806,206 @@ export default function App() {
             <AdminPanel onBack={() => setIsAdminMode(false)} />
           ) : (
             <>
+              {isPlayerProfileOpen && (
+                <div className="mb-6 md:mb-8">
+                  <div className="overflow-hidden rounded-2xl md:rounded-3xl border-2 md:border-4 border-slate-800 bg-[linear-gradient(135deg,#082f49_0%,#0f172a_42%,#4c1d95_100%)] text-white shadow-[4px_4px_0px_0px_rgba(249,115,22,0.45)] md:shadow-[8px_8px_0px_0px_rgba(249,115,22,0.45)]">
+                    <div className="bg-[radial-gradient(circle_at_top_left,rgba(253,224,71,0.22),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(56,189,248,0.18),transparent_30%)] p-4 md:p-8">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">My Profile</p>
+                        <h2 className="mt-2 text-2xl md:text-3xl font-black uppercase tracking-tight text-white">
+                          {playerProfile?.displayName || getUserLabel(user)}
+                        </h2>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <span className="inline-flex items-center gap-2 rounded-full border border-amber-300/40 bg-amber-300/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-amber-100">
+                            <BadgeCheck className="h-3 w-3" />
+                            Verified Player
+                          </span>
+                          {playerProfile && playerProfile.claimedTournamentCount > 0 && (
+                            <span className="inline-flex items-center rounded-full border border-sky-300/40 bg-sky-300/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-sky-100">
+                              {playerProfile.claimedTournamentCount} tournaments
+                            </span>
+                          )}
+                          {playerProfile && playerProfile.totalGames > 0 && (
+                            <span className="inline-flex items-center rounded-full border border-lime-300/40 bg-lime-300/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-lime-100">
+                              {playerProfile.winRate}% win rate
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-200">
+                          Your Dinkly results across claimed tournaments.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsPlayerProfileOpen(false)}
+                        className="rounded-2xl border-2 border-white/40 bg-white/10 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-white transition-all hover:bg-white/20"
+                      >
+                        Close Profile
+                      </button>
+                    </div>
+
+                    {isPlayerProfileLoading ? (
+                      <div className="mt-6 rounded-2xl border-2 border-dashed border-white/20 bg-white/5 px-4 py-8 text-center text-xs font-black uppercase tracking-[0.16em] text-slate-300">
+                        Loading your stats...
+                      </div>
+                    ) : playerProfile && playerProfile.claimedTournamentCount > 0 ? (
+                      <>
+                        {(() => {
+                          const activeFormatStats = playerProfile.formatBreakdown[selectedProfileFormat];
+                          const alternateFormat: TournamentFormat = selectedProfileFormat === 'doubles' ? 'singles' : 'doubles';
+                          const alternateFormatStats = playerProfile.formatBreakdown[alternateFormat];
+
+                          return (
+                        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+                          <div className="rounded-3xl border-2 border-amber-300/30 bg-[linear-gradient(135deg,rgba(253,186,116,0.22),rgba(251,191,36,0.12))] p-5">
+                            <h3 className="text-sm font-black uppercase tracking-[0.16em] text-amber-100">Overall Totals</h3>
+                            <div className="mt-4 grid grid-cols-3 gap-3">
+                              <div className="rounded-2xl bg-slate-950/20 px-3 py-3">
+                                <div className="text-[10px] font-black uppercase tracking-[0.14em] text-amber-100/80">Games</div>
+                                <div className="mt-1 text-xl font-black text-white">{playerProfile.totalGames}</div>
+                              </div>
+                              <div className="rounded-2xl bg-slate-950/20 px-3 py-3">
+                                <div className="text-[10px] font-black uppercase tracking-[0.14em] text-amber-100/80">Wins</div>
+                                <div className="mt-1 text-xl font-black text-white">{playerProfile.totalWins}</div>
+                              </div>
+                              <div className="rounded-2xl bg-slate-950/20 px-3 py-3">
+                                <div className="text-[10px] font-black uppercase tracking-[0.14em] text-amber-100/80">Points</div>
+                                <div className="mt-1 text-xl font-black text-white">{playerProfile.totalPoints}</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="rounded-3xl border-2 border-sky-300/30 bg-[linear-gradient(135deg,rgba(56,189,248,0.2),rgba(45,212,191,0.12))] p-5">
+                            <div className="flex items-center justify-between gap-3">
+                              <h3 className="text-sm font-black uppercase tracking-[0.16em] text-sky-100">Format View</h3>
+                              <div className="inline-flex rounded-2xl border border-white/15 bg-slate-950/20 p-1">
+                                {(['doubles', 'singles'] as TournamentFormat[]).map((formatKey) => {
+                                  const isActive = selectedProfileFormat === formatKey;
+                                  return (
+                                    <button
+                                      key={formatKey}
+                                      type="button"
+                                      onClick={() => setSelectedProfileFormat(formatKey)}
+                                      className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] transition-all ${
+                                        isActive
+                                          ? 'bg-white text-slate-900'
+                                          : 'text-sky-100/80 hover:bg-white/10'
+                                      }`}
+                                    >
+                                      {getTournamentFormatTag(formatKey).label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            <div className="mt-4 rounded-[28px] border border-white/15 bg-slate-950/20 p-5">
+                              <div className="flex items-start justify-between gap-4">
+                                <div>
+                                  <div className="text-lg font-black uppercase text-white">
+                                    {getTournamentFormatTag(selectedProfileFormat).label}
+                                  </div>
+                                  <div className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-sky-100/80">
+                                    {activeFormatStats.tournaments} tournaments tracked
+                                  </div>
+                                </div>
+                                <div className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-white">
+                                  {activeFormatStats.winRate}% win rate
+                                </div>
+                              </div>
+                              <div className="mt-5 grid grid-cols-3 gap-3">
+                                <div className="rounded-2xl bg-white/10 px-3 py-3">
+                                  <div className="text-[10px] font-black uppercase tracking-[0.14em] text-sky-100/80">Games</div>
+                                  <div className="mt-1 text-xl font-black text-white">{activeFormatStats.games}</div>
+                                </div>
+                                <div className="rounded-2xl bg-white/10 px-3 py-3">
+                                  <div className="text-[10px] font-black uppercase tracking-[0.14em] text-sky-100/80">Wins</div>
+                                  <div className="mt-1 text-xl font-black text-white">{activeFormatStats.wins}</div>
+                                </div>
+                                <div className="rounded-2xl bg-white/10 px-3 py-3">
+                                  <div className="text-[10px] font-black uppercase tracking-[0.14em] text-sky-100/80">Points</div>
+                                  <div className="mt-1 text-xl font-black text-white">{activeFormatStats.points}</div>
+                                </div>
+                              </div>
+                              <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                                <div className="text-[10px] font-black uppercase tracking-[0.16em] text-sky-100/80">
+                                  {getTournamentFormatTag(alternateFormat).label} On Demand
+                                </div>
+                                <div className="mt-2 flex items-center justify-between gap-3">
+                                  <div className="text-sm font-black text-white">
+                                    {alternateFormatStats.wins}W / {alternateFormatStats.games}G
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedProfileFormat(alternateFormat)}
+                                    className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-white hover:bg-white/20"
+                                  >
+                                    View {getTournamentFormatTag(alternateFormat).label}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                          );
+                        })()}
+
+                        <div className="mt-6">
+                          <h3 className="text-sm font-black uppercase tracking-[0.16em] text-fuchsia-100">Recent Verified Tournaments</h3>
+                          <div className="mt-3 grid gap-3">
+                            {playerProfile.recentClaimedTournaments.map((item) => (
+                              <button
+                                key={`profile-${item.tournamentId}-${item.playerName}`}
+                                type="button"
+                                onClick={() => setActiveTournamentId(item.tournamentId)}
+                                className="rounded-3xl border-2 border-fuchsia-300/20 bg-[linear-gradient(135deg,rgba(217,70,239,0.16),rgba(56,189,248,0.12))] px-4 py-4 text-left transition-all hover:bg-white/15"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-black uppercase text-white">{item.tournamentName}</span>
+                                      <span className="inline-flex items-center gap-1 rounded-md border border-sky-300/40 bg-sky-400/10 px-2 py-0.5 text-[9px] font-black uppercase text-sky-100">
+                                        <BadgeCheck className="h-3 w-3" />
+                                        {item.playerName}
+                                      </span>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-[0.14em] text-fuchsia-100/80">
+                                      <span>{item.tournamentCode}</span>
+                                      <span>•</span>
+                                      <span>{getTournamentFormatTag(item.tournamentFormat).label}</span>
+                                      <span>•</span>
+                                      <span>{item.tournamentStatus}</span>
+                                    </div>
+                                  </div>
+                                  <div className="text-right text-[10px] font-black uppercase tracking-[0.14em] text-fuchsia-100/80">
+                                    <div>{item.wins}W / {item.gamesPlayed}G</div>
+                                    <div className="mt-1">{item.points} pts</div>
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="mt-6 rounded-2xl border-2 border-dashed border-white/20 bg-white/5 px-4 py-6">
+                        <p className="text-sm font-black uppercase text-white">No verified player profile yet.</p>
+                        <p className="mt-2 text-xs font-bold text-slate-300">
+                          Claim your name or use <span className="font-black uppercase">Add Me</span> in a tournament roster, and your stats will start building here.
+                        </p>
+                      </div>
+                    )}
+
+                    {playerProfileError && (
+                      <div className="mt-4 rounded-xl border-2 border-orange-200 bg-orange-50 px-4 py-3 text-sm font-bold text-orange-700">
+                        {playerProfileError}
+                      </div>
+                    )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid gap-4 md:gap-8">
                 <motion.div 
                   whileHover={{ scale: 1.01 }}

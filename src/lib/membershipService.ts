@@ -58,21 +58,22 @@ export const validateInviteCode = async (code: string): Promise<InviteCode | nul
 export const claimInviteCode = async (uid: string, email: string, displayName: string, invite: InviteCode) => {
   const inviteRef = doc(db, 'inviteCodes', invite.id);
   const membershipRef = doc(db, 'memberships', uid);
+  const batch = writeBatch(db);
 
-  // Update invite code uses
-  await updateDoc(inviteRef, {
+  batch.update(inviteRef, {
     currentUses: increment(1),
     claimedBy: arrayUnion(uid)
   });
 
-  // Create membership
-  await setDoc(membershipRef, {
+  batch.set(membershipRef, {
     email,
     displayName,
     inviteCodeId: invite.id,
     status: 'active',
     joinedAt: serverTimestamp()
   });
+
+  await batch.commit();
 };
 
 export const generateInviteCode = async (maxUses: number = 10) => {

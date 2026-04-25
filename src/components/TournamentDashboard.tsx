@@ -23,13 +23,13 @@ import { generateRoundMatches, getMinimumPlayers, getTournamentFormat, getTourna
 import { 
   Trophy, 
   Users, 
-  Play, 
   Plus, 
   Share2, 
   ChevronLeft, 
   RotateCcw,
   AlertTriangle,
-  Loader2
+  Loader2,
+  Flag
 } from 'lucide-react';
 import Leaderboard from './Leaderboard';
 import MatchList from './MatchList';
@@ -107,10 +107,14 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   const isOwner = tournament?.ownerId === auth.currentUser?.uid;
   const canManageTournament = isOwner && !readOnly;
   const canContributePlayers = !readOnly && (isOwner || isTournamentMember);
-  const showSetupTab = !readOnly && tournament?.status === 'setup' && (isOwner || isTournamentMember);
+  const showSetupTab = !readOnly && (isOwner || isTournamentMember);
   const tournamentFormat: TournamentFormat = getTournamentFormat(tournament?.format);
   const tournamentFormatTag = getTournamentFormatTag(tournamentFormat);
   const minimumPlayers = getMinimumPlayers(tournamentFormat);
+  const currentRound = matches.length > 0 ? Math.max(...matches.map((match) => match.round)) : 0;
+  const currentRoundMatches = matches.filter((match) => match.round === currentRound && match.status !== 'void');
+  const gamesLeftInRound = currentRoundMatches.filter((match) => match.status === 'pending').length;
+  const canCloseTournament = canManageTournament && tournament?.status === 'active' && matches.length > 0 && gamesLeftInRound === 0;
 
   const startTournament = async () => {
     if (!canManageTournament) return;
@@ -134,12 +138,6 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
     setIsGeneratingRound(true);
 
     try {
-      const pendingMatches = matches.filter((match) => match.status === 'pending');
-      if (pendingMatches.length > 0) {
-        setRoundActionError('Finish scoring the current round before generating the next one.');
-        return;
-      }
-
       if (players.length < minimumPlayers) {
         setRoundActionError(`You need at least ${minimumPlayers} players for a ${tournamentFormat} round.`);
         return;
@@ -147,7 +145,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
 
       const currentRound = matches.length > 0 ? Math.max(...matches.map(m => m.round)) : 0;
       const nextRound = currentRound + 1;
-      const roundMatches = generateRoundMatches(players, nextRound, tournamentFormat);
+      const roundMatches = generateRoundMatches(players, nextRound, tournamentFormat, matches);
 
       if (roundMatches.length === 0) {
         setRoundActionError(`No ${tournamentFormat} matches could be generated from the current roster.`);
@@ -175,6 +173,22 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
       setRoundActionError(message);
     } finally {
       setIsGeneratingRound(false);
+    }
+  };
+
+  const completeTournament = async () => {
+    if (!canCloseTournament) return;
+    if (!window.confirm('Close this tournament now? This will mark it completed and freeze round generation.')) return;
+
+    setRoundActionError(null);
+    try {
+      await updateDoc(doc(db, 'tournaments', tournamentId), {
+        status: 'completed',
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      const message = getReadableFirestoreError(e, 'Unable to close the tournament right now.');
+      setRoundActionError(message);
     }
   };
 
@@ -263,18 +277,31 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
             <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
               <div className="flex items-center justify-between mb-6 md:mb-8">
                 <h2 className="text-xl md:text-3xl font-black text-slate-800">COURT TRACKER</h2>
-                {canManageTournament && tournament?.status === 'active' && (
-                  <button 
-                    onClick={generateNextRound}
-                    disabled={isGeneratingRound}
-                    className="brutal-button-lime py-2 px-3 md:py-3 md:px-6"
-                  >
-                    <div className="flex items-center gap-1.5 md:gap-2">
-                      {isGeneratingRound ? <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Plus className="w-4 h-4 md:w-5 md:h-5" />} 
-                      <span className="text-xs sm:text-sm">{isGeneratingRound ? 'BUILDING ROUND...' : 'NEXT ROUND'}</span>
-                    </div>
-                  </button>
-                )}
+                <div className="flex flex-wrap justify-end gap-2">
+                  {canCloseTournament && (
+                    <button
+                      onClick={completeTournament}
+                      className="rounded-2xl border-2 border-slate-800 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <Flag className="h-3.5 w-3.5" />
+                        Close Tournament
+                      </span>
+                    </button>
+                  )}
+                  {canManageTournament && tournament?.status === 'active' && (
+                    <button 
+                      onClick={generateNextRound}
+                      disabled={isGeneratingRound}
+                      className="brutal-button-lime py-2 px-3 md:py-3 md:px-6"
+                    >
+                      <div className="flex items-center gap-1.5 md:gap-2">
+                        {isGeneratingRound ? <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Plus className="w-4 h-4 md:w-5 md:h-5" />} 
+                        <span className="text-xs sm:text-sm">{isGeneratingRound ? 'BUILDING ROUND...' : 'NEXT ROUND'}</span>
+                      </div>
+                    </button>
+                  )}
+                </div>
               </div>
               {roundActionError && (
                 <div className="mb-5 flex items-start gap-3 rounded-2xl border-2 border-orange-200 bg-orange-50 px-4 py-3 text-sm font-bold text-orange-700">

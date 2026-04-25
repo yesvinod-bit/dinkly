@@ -37,6 +37,7 @@ export interface Tournament {
   format?: TournamentFormat;
   status: 'setup' | 'active' | 'completed';
   createdAt: Timestamp;
+  updatedAt?: Timestamp;
 }
 
 export interface Player {
@@ -46,6 +47,9 @@ export interface Player {
   gamesPlayed: number;
   wins: number;
   addedAt: Timestamp;
+  claimedByUserId?: string;
+  claimedByEmail?: string;
+  claimedAt?: Timestamp;
 }
 
 export interface Match {

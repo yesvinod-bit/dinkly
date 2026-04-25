@@ -1,43 +1,66 @@
-import { generateRoundMatches } from './src/lib/tournamentLogic';
+import assert from 'node:assert/strict';
+import { generateRoundMatches, getMinimumPlayers, getTournamentFormat } from './src/lib/tournamentLogic.ts';
 
-const mockPlayers = (n: number) => Array.from({ length: n }, (_, i) => ({
-  id: `p${i}`,
-  name: `Player ${i}`,
-  points: 0,
-  gamesPlayed: 0,
-  wins: 0,
-  addedAt: { seconds: 0, nanoseconds: 0 } as any
-}));
+type MockPlayer = {
+  id: string;
+  name: string;
+  points: number;
+  gamesPlayed: number;
+  wins: number;
+  addedAt: unknown;
+};
 
-function test() {
-  console.log("--- Testing generateRoundMatches ---");
-  
-  [3, 4, 6, 8, 9].forEach(count => {
-    const players = mockPlayers(count);
-    const matches = generateRoundMatches(players, 1);
-    console.log(`Players: ${count}, Matches Generated: ${matches.length}`);
-    
-    if (count < 4 && matches.length !== 0) {
-      console.error(`FAIL: Should generate 0 matches for ${count} players`);
-    }
-    
-    if (count >= 4 && count < 8 && matches.length !== 1) {
-       console.error(`FAIL: Should generate 1 match for ${count} players`);
-    }
+const mockPlayers = (count: number): MockPlayer[] =>
+  Array.from({ length: count }, (_, index) => ({
+    id: `p${index}`,
+    name: `Player ${index + 1}`,
+    points: 0,
+    gamesPlayed: 0,
+    wins: 0,
+    addedAt: { seconds: 0, nanoseconds: 0 },
+  }));
 
-    if (count >= 8 && matches.length !== 2) {
-       console.error(`FAIL: Should generate 2 matches for ${count} players`);
-    }
-
-    // Check for duplicate players across matches
-    const allPlayersInRound = matches.flatMap(m => [...(m.team1 || []), ...(m.team2 || [])]);
-    const uniquePlayers = new Set(allPlayersInRound);
-    if (uniquePlayers.size !== allPlayersInRound.length) {
-      console.error(`FAIL: Duplicate players in round for ${count} players`);
-    }
-  });
-
-  console.log("--- End Testing ---");
+function assertUniquePlayersPerRound(matches: ReturnType<typeof generateRoundMatches>) {
+  const allPlayers = matches.flatMap((match) => [...(match.team1 ?? []), ...(match.team2 ?? [])]);
+  assert.equal(new Set(allPlayers).size, allPlayers.length, 'players should not be duplicated within a round');
 }
 
-test();
+function testTournamentFormats() {
+  assert.equal(getTournamentFormat('singles'), 'singles');
+  assert.equal(getTournamentFormat('doubles'), 'doubles');
+  assert.equal(getTournamentFormat(undefined), 'doubles');
+  assert.equal(getMinimumPlayers('singles'), 2);
+  assert.equal(getMinimumPlayers('doubles'), 4);
+}
+
+function testSinglesRoundGeneration() {
+  const twoPlayers = generateRoundMatches(mockPlayers(2) as any, 1, 'singles');
+  assert.equal(twoPlayers.length, 1, '2 singles players should produce 1 match');
+  assert.deepEqual(twoPlayers[0].team1?.length, 1);
+  assert.deepEqual(twoPlayers[0].team2?.length, 1);
+  assert.equal(twoPlayers[0].status, 'pending');
+
+  const fivePlayers = generateRoundMatches(mockPlayers(5) as any, 2, 'singles');
+  assert.equal(fivePlayers.length, 2, '5 singles players should produce 2 matches');
+  assertUniquePlayersPerRound(fivePlayers);
+}
+
+function testDoublesRoundGeneration() {
+  const fourPlayers = generateRoundMatches(mockPlayers(4) as any, 1, 'doubles');
+  assert.equal(fourPlayers.length, 1, '4 doubles players should produce 1 match');
+  assert.deepEqual(fourPlayers[0].team1?.length, 2);
+  assert.deepEqual(fourPlayers[0].team2?.length, 2);
+
+  const ninePlayers = generateRoundMatches(mockPlayers(9) as any, 3, 'doubles');
+  assert.equal(ninePlayers.length, 2, '9 doubles players should produce 2 matches');
+  assertUniquePlayersPerRound(ninePlayers);
+}
+
+function main() {
+  testTournamentFormats();
+  testSinglesRoundGeneration();
+  testDoublesRoundGeneration();
+  console.log('logic tests passed');
+}
+
+main();

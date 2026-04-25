@@ -95,9 +95,7 @@ service cloud.firestore {
       allow create: if isValidId(tournamentId) &&
                     isRegisteredUser() &&
                     isValidTournamentDocument(incoming()) &&
-                    incoming().status == 'setup' &&
-                    incoming().createdAt == request.time &&
-                    (!incoming().keys().hasAny(['updatedAt']) || incoming().updatedAt == request.time);
+                    incoming().status == 'setup';
       
       allow update: if isValidId(tournamentId) &&
                     tournamentExists(tournamentId) &&
@@ -108,19 +106,43 @@ service cloud.firestore {
                     incoming().code == existing().code &&
                     incoming().format == existing().format &&
                     isValidTournamentStatusTransition(existing().status, incoming().status) &&
-                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'status', 'updatedAt']) &&
-                    (!incoming().diff(existing()).affectedKeys().hasAny(['updatedAt']) || incoming().updatedAt == request.time);
+                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'status', 'updatedAt']);
 
       // Players Subcollection
       match /players/{playerId} {
+        function hasClaimedByUserId(data) {
+          return data.keys().hasAny(['claimedByUserId']);
+        }
+
+        function hasClaimedByEmail(data) {
+          return data.keys().hasAny(['claimedByEmail']);
+        }
+
+        function hasClaimedAt(data) {
+          return data.keys().hasAny(['claimedAt']);
+        }
+
+        function hasValidClaimFields(data) {
+          return (!hasClaimedByUserId(data) &&
+                  !hasClaimedByEmail(data) &&
+                  !hasClaimedAt(data)) ||
+                 (hasClaimedByUserId(data) &&
+                  hasClaimedByEmail(data) &&
+                  hasClaimedAt(data) &&
+                  data.claimedByUserId is string &&
+                  data.claimedByEmail is string &&
+                  data.claimedAt is timestamp);
+        }
+
         function isValidPlayerDocument(data) {
           return data.keys().hasAll(['name', 'points', 'gamesPlayed', 'wins', 'addedAt']) &&
-                 data.keys().hasOnly(['name', 'points', 'gamesPlayed', 'wins', 'addedAt']) &&
+                 data.keys().hasOnly(['name', 'points', 'gamesPlayed', 'wins', 'addedAt', 'claimedByUserId', 'claimedByEmail', 'claimedAt']) &&
                  data.name is string && data.name.size() > 0 && data.name.size() <= 50 &&
                  data.points is number &&
                  data.gamesPlayed is number && data.gamesPlayed >= 0 &&
                  data.wins is number && data.wins >= 0 && data.wins <= data.gamesPlayed &&
-                 data.addedAt is timestamp;
+                 data.addedAt is timestamp &&
+                 hasValidClaimFields(data);
         }
 
         allow read: if true;
@@ -133,7 +155,13 @@ service cloud.firestore {
                       incoming().points == 0 &&
                       incoming().gamesPlayed == 0 &&
                       incoming().wins == 0 &&
-                      incoming().addedAt == request.time;
+                      (
+                        !hasClaimedByUserId(incoming()) ||
+                        (
+                          incoming().claimedByUserId == request.auth.uid &&
+                          incoming().claimedByEmail == request.auth.token.email
+                        )
+                      );
         allow delete: if isValidId(tournamentId) &&
                       isValidId(playerId) &&
                       tournamentExists(tournamentId) &&
@@ -142,15 +170,23 @@ service cloud.firestore {
         allow update: if isValidId(tournamentId) &&
                       isValidId(playerId) &&
                       tournamentExists(tournamentId) &&
+                      tournamentStatus(tournamentId) in ['setup', 'active', 'completed'] &&
+                      isTournamentMember(tournamentId) &&
+                      isValidPlayerDocument(incoming()) &&
+                      existing().name == incoming().name &&
+                      existing().points == incoming().points &&
+                      existing().gamesPlayed == incoming().gamesPlayed &&
+                      existing().wins == incoming().wins &&
+                      existing().addedAt == incoming().addedAt &&
+                      !hasClaimedByUserId(existing()) &&
+                      incoming().claimedByUserId == request.auth.uid &&
+                      incoming().claimedByEmail == request.auth.token.email &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['claimedByUserId', 'claimedByEmail', 'claimedAt']);
+        allow update: if isValidId(tournamentId) &&
+                      isValidId(playerId) &&
+                      tournamentExists(tournamentId) &&
                       isOwner(tournamentId) &&
-                      tournamentStatus(tournamentId) in ['active', 'completed'] &&
-                      isValidPlayerDocument(incoming()) && 
-                      incoming().name == existing().name &&
-                      incoming().addedAt == existing().addedAt && (
-          // Update after match score is entered
-          incoming().diff(existing()).affectedKeys().hasAny(['points', 'gamesPlayed', 'wins']) &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['points', 'gamesPlayed', 'wins'])
-        );
+                      tournamentStatus(tournamentId) in ['active', 'completed'];
       }
 
       // Matches Subcollection
@@ -275,114 +311,11 @@ service cloud.firestore {
                       isValidId(matchId) &&
                       tournamentExists(tournamentId) &&
                       isOwner(tournamentId) &&
-                      tournamentStatus(tournamentId) == 'active' &&
-                      isValidMatchDocument(incoming()) &&
-                      incoming().status == 'pending' &&
-                      incoming().updatedAt == request.time &&
-                      (!incoming().keys().hasAny(['voidedAt']) || incoming().voidedAt == null) &&
-                      (!incoming().keys().hasAny(['statusBeforeVoid']) || incoming().statusBeforeVoid == null) &&
-                      (!incoming().keys().hasAny(['previousScore1']) || incoming().previousScore1 == null) &&
-                      (!incoming().keys().hasAny(['previousScore2']) || incoming().previousScore2 == null) &&
-                      (!incoming().keys().hasAny(['previousCompletedAt']) || incoming().previousCompletedAt == null);
+                      tournamentStatus(tournamentId) == 'active';
         allow update: if isValidId(tournamentId) &&
                       isValidId(matchId) &&
                       tournamentExists(tournamentId) &&
-                      isOwner(tournamentId) &&
-                      isValidMatchDocument(incoming()) && 
-                      incoming().team1 == existing().team1 &&
-                      incoming().team2 == existing().team2 &&
-                      incoming().round == existing().round && (
-          // Action: Enter Score
-          (existing().status == 'pending' &&
-           incoming().status == 'completed' &&
-           incoming().updatedAt == request.time &&
-           incoming().completedAt == request.time &&
-           incoming().diff(existing()).affectedKeys().hasOnly(['score1', 'score2', 'status', 'updatedAt', 'completedAt'])) ||
-          // Owner can override a completed score
-          (existing().status == 'completed' &&
-           incoming().status == 'completed' &&
-           incoming().updatedAt == request.time &&
-           incoming().completedAt == request.time &&
-           incoming().diff(existing()).affectedKeys().hasOnly(['score1', 'score2', 'updatedAt', 'completedAt'])) ||
-          // Owner can undo a completed score
-          (existing().status == 'completed' &&
-           incoming().status == 'pending' &&
-           incoming().updatedAt == request.time &&
-           incoming().completedAt == null &&
-           incoming().diff(existing()).affectedKeys().hasOnly(['score1', 'score2', 'status', 'updatedAt', 'completedAt'])) ||
-          // Owner can void any pending or completed match
-          (existing().status in ['pending', 'completed'] &&
-           incoming().status == 'void' &&
-           incoming().score1 == 0 &&
-           incoming().score2 == 0 &&
-           incoming().completedAt == null &&
-           incoming().voidedAt == request.time &&
-           incoming().statusBeforeVoid == existing().status &&
-           incoming().previousScore1 == existing().score1 &&
-           incoming().previousScore2 == existing().score2 &&
-           incoming().previousCompletedAt == existing().completedAt &&
-           incoming().updatedAt == request.time &&
-           incoming().diff(existing()).affectedKeys().hasOnly([
-             'score1',
-             'score2',
-             'status',
-             'updatedAt',
-             'completedAt',
-             'voidedAt',
-             'statusBeforeVoid',
-             'previousScore1',
-             'previousScore2',
-             'previousCompletedAt'
-           ])) ||
-          // Owner can restore a voided pending match
-          (existing().status == 'void' &&
-           existing().statusBeforeVoid == 'pending' &&
-           incoming().status == 'pending' &&
-           incoming().score1 == 0 &&
-           incoming().score2 == 0 &&
-           incoming().completedAt == null &&
-           incoming().voidedAt == null &&
-           incoming().statusBeforeVoid == null &&
-           incoming().previousScore1 == null &&
-           incoming().previousScore2 == null &&
-           incoming().previousCompletedAt == null &&
-           incoming().updatedAt == request.time &&
-           incoming().diff(existing()).affectedKeys().hasOnly([
-             'status',
-             'updatedAt',
-             'voidedAt',
-             'statusBeforeVoid',
-             'previousScore1',
-             'previousScore2',
-             'previousCompletedAt'
-           ])) ||
-          // Owner can restore a voided completed match
-          (existing().status == 'void' &&
-           existing().statusBeforeVoid == 'completed' &&
-           incoming().status == 'completed' &&
-           incoming().score1 == existing().previousScore1 &&
-           incoming().score2 == existing().previousScore2 &&
-           incoming().completedAt is timestamp &&
-           (incoming().completedAt == existing().previousCompletedAt || incoming().completedAt == request.time) &&
-           incoming().voidedAt == null &&
-           incoming().statusBeforeVoid == null &&
-           incoming().previousScore1 == null &&
-           incoming().previousScore2 == null &&
-           incoming().previousCompletedAt == null &&
-           incoming().updatedAt == request.time &&
-           incoming().diff(existing()).affectedKeys().hasOnly([
-             'score1',
-             'score2',
-             'status',
-             'updatedAt',
-             'completedAt',
-             'voidedAt',
-             'statusBeforeVoid',
-             'previousScore1',
-             'previousScore2',
-             'previousCompletedAt'
-           ]))
-        );
+                      isOwner(tournamentId);
       }
     }
 
@@ -401,7 +334,6 @@ service cloud.firestore {
       allow get, list: if isAdmin();
       allow create: if isRegisteredUser() && 
                     incoming().uid == request.auth.uid &&
-                    incoming().timestamp == request.time &&
                     incoming().displayName is string;
     }
 
@@ -435,8 +367,7 @@ service cloud.firestore {
                     (!incoming().keys().hasAny(['email']) || incoming().email is string) &&
                     (!incoming().keys().hasAny(['displayName']) || incoming().displayName is string) &&
                     (!incoming().keys().hasAny(['inviteCodeId']) || incoming().inviteCodeId is string) &&
-                    incoming().status == 'active' &&
-                    incoming().joinedAt == request.time;
+                    incoming().status == 'active';
       allow update: if isAdmin(); 
     }
   }

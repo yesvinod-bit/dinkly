@@ -51,6 +51,14 @@ interface LoginRecord {
   timestamp?: Timestamp;
 }
 
+interface LoginSummary {
+  key: string;
+  displayName: string;
+  email: string;
+  loginBadge: string;
+  recentTimes: Timestamp[];
+}
+
 export default function AdminPanel({ onBack }: Props) {
   const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
   const [memberships, setMemberships] = useState<(Membership & { id: string })[]>([]);
@@ -87,7 +95,7 @@ export default function AdminPanel({ onBack }: Props) {
     const loginsQuery = query(
       collection(db, 'logins'),
       orderBy('timestamp', 'desc'),
-      limit(20)
+      limit(50)
     );
     const snap = await getDocs(loginsQuery);
     return snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as LoginRecord));
@@ -107,6 +115,29 @@ export default function AdminPanel({ onBack }: Props) {
   };
 
   const isGoogleLogin = (login: LoginRecord) => getLoginBadge(login) === 'Google';
+
+  const groupedRecentLogins: LoginSummary[] = recentLogins.reduce<LoginSummary[]>((groups, login) => {
+    const groupKey = (login.email || login.uid || login.id).trim().toLowerCase();
+    const existingGroup = groups.find((group) => group.key === groupKey);
+    const loginBadge = getLoginBadge(login);
+
+    if (existingGroup) {
+      if (login.timestamp && existingGroup.recentTimes.length < 2) {
+        existingGroup.recentTimes.push(login.timestamp);
+      }
+      return groups;
+    }
+
+    groups.push({
+      key: groupKey,
+      displayName: login.displayName || 'Unknown Player',
+      email: login.email || 'anonymous@guest',
+      loginBadge,
+      recentTimes: login.timestamp ? [login.timestamp] : []
+    });
+
+    return groups;
+  }, []);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -204,19 +235,19 @@ export default function AdminPanel({ onBack }: Props) {
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
       {/* Header with Navigation */}
-      <div className="flex items-center justify-between bg-slate-800 p-4 rounded-3xl border-4 border-slate-700 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-4 bg-slate-800 p-4 rounded-3xl border-4 border-slate-700 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3 min-w-0">
           <div className="w-10 h-10 bg-lime-400 border-2 border-slate-900 rounded-xl flex items-center justify-center">
             <ShieldCheck className="w-6 h-6 text-slate-900" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h2 className="text-lg font-black text-white uppercase leading-none">Security Center</h2>
             <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">Admin Operations</p>
           </div>
         </div>
         <button 
           onClick={onBack}
-          className="px-4 py-2 bg-white border-2 border-slate-900 rounded-xl font-black text-[10px] uppercase shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all"
+          className="w-full px-4 py-2 bg-white border-2 border-slate-900 rounded-xl font-black text-[10px] uppercase shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all sm:w-auto"
         >
           Close Panel
         </button>
@@ -224,24 +255,24 @@ export default function AdminPanel({ onBack }: Props) {
 
       {/* Invite Code Generator */}
       <section className="bg-white border-4 border-slate-800 rounded-[2rem] p-6 shadow-[8px_8px_0px_0px_rgba(163,230,53,1)]">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 bg-orange-100 border-2 border-slate-800 rounded-xl flex items-center justify-center">
               <Key className="w-5 h-5 text-orange-600" />
             </div>
-            <div>
+            <div className="min-w-0">
               <h2 className="text-xl font-black text-slate-800 uppercase italic">Invite Codes</h2>
-              <p className="text-[9px] font-black text-emerald-500 uppercase tracking-tight mt-1 flex items-center gap-1">
+              <p className="mt-1 flex items-center gap-1 text-[9px] font-black uppercase tracking-tight text-emerald-500 break-all">
                 <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shrink-0" />
                 Sharing from: {window.location.origin.includes('ais-dev-') ? window.location.origin.replace('ais-dev-', 'ais-pre-') : window.location.origin}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <button 
               onClick={handleCleanupInviteCodes}
               disabled={cleaning}
-              className="bg-white border-2 border-slate-800 text-slate-800 rounded-xl px-3 py-2 text-[10px] font-black uppercase shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all disabled:opacity-50 flex items-center gap-2"
+              className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-slate-800 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none disabled:opacity-50 sm:w-auto"
             >
               {cleaning ? (
                 <div className="w-4 h-4 border-2 border-slate-800 border-t-transparent animate-spin rounded-full" />
@@ -253,7 +284,7 @@ export default function AdminPanel({ onBack }: Props) {
             <button 
               onClick={handleGenerate}
               disabled={generating}
-              className="brutal-button-orange text-xs flex items-center gap-2 disabled:opacity-50"
+              className="brutal-button-orange flex w-full items-center justify-center gap-2 text-xs disabled:opacity-50 sm:w-auto"
             >
               {generating ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent animate-spin rounded-full" />
@@ -267,8 +298,8 @@ export default function AdminPanel({ onBack }: Props) {
 
         <div className="grid gap-3">
           {inviteCodes.map((invite) => (
-            <div key={invite.id} className="flex items-center justify-between p-4 bg-slate-50 border-2 border-slate-800 rounded-2xl group">
-              <div className="flex items-center gap-4">
+            <div key={invite.id} className="flex flex-col gap-4 p-4 bg-slate-50 border-2 border-slate-800 rounded-2xl group xl:flex-row xl:items-start xl:justify-between">
+              <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
                 <span className="font-mono font-black text-lg text-slate-800 tracking-wider">
                   {invite.code}
                 </span>
@@ -279,28 +310,28 @@ export default function AdminPanel({ onBack }: Props) {
                   </span>
                 </div>
               </div>
-                <div className="flex flex-col gap-3">
+                <div className="flex min-w-0 flex-col gap-3 xl:max-w-[32rem]">
                   <div className="bg-slate-50 border-2 border-slate-200 p-2 rounded-xl">
                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-tighter mb-1">Friends must use this URL:</p>
-                    <code className="text-[10px] font-mono font-bold text-emerald-600 break-all bg-emerald-50 px-2 py-1 rounded border border-emerald-100 flex items-center justify-between">
-                      {window.location.origin.replace('ais-dev-', 'ais-pre-')}?invite={invite.code}
+                    <code className="flex flex-col gap-2 rounded border border-emerald-100 bg-emerald-50 px-2 py-1 text-[10px] font-mono font-bold text-emerald-600 sm:flex-row sm:items-start sm:justify-between">
+                      <span className="break-all">{window.location.origin.replace('ais-dev-', 'ais-pre-')}?invite={invite.code}</span>
                       <button 
                         onClick={() => {
                           navigator.clipboard.writeText(`${window.location.origin.replace('ais-dev-', 'ais-pre-')}?invite=${invite.code}`);
                           setCopiedId(invite.code + '_link');
                           setTimeout(() => setCopiedId(null), 2000);
                         }}
-                        className="ml-2 bg-emerald-500 text-white p-1 rounded-lg hover:bg-emerald-600"
+                        className="self-start bg-emerald-500 text-white p-1 rounded-lg hover:bg-emerald-600 sm:ml-2"
                       >
                         {copiedId === invite.code + '_link' ? <CheckCircle2 className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                       </button>
                     </code>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <button 
                       onClick={() => handleInvite(invite.code, 'share')}
-                      className="flex-1 p-2 bg-white border-2 border-slate-800 rounded-xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-slate-800 bg-white p-2 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none sm:flex-1"
                       title="Share via Native Menu"
                     >
                       <LinkIcon className="w-4 h-4 text-slate-800" />
@@ -309,7 +340,7 @@ export default function AdminPanel({ onBack }: Props) {
 
                     <button 
                       onClick={() => handleInvite(invite.code, 'copy')}
-                      className="p-2 bg-lime-400 border-2 border-slate-800 rounded-xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all flex items-center gap-2"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-slate-800 bg-lime-400 p-2 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none sm:w-auto"
                       title="Copy WhatsApp Formatting"
                     >
                       {copiedId === invite.code + '_msg' ? (
@@ -325,7 +356,7 @@ export default function AdminPanel({ onBack }: Props) {
                     <button 
                       onClick={() => handleDeleteInvite(invite)}
                       disabled={deletingId === invite.id}
-                      className="p-2 bg-orange-100 border-2 border-slate-800 rounded-xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all flex items-center gap-2 disabled:opacity-50"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-slate-800 bg-orange-100 p-2 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none disabled:opacity-50 sm:w-auto"
                       title="Delete Invite Code"
                     >
                       {deletingId === invite.id ? (
@@ -355,18 +386,18 @@ export default function AdminPanel({ onBack }: Props) {
         </div>
 
         <div className="grid gap-3">
-          {recentLogins.length === 0 ? (
+          {groupedRecentLogins.length === 0 ? (
             <div className="p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl text-[11px] font-black text-slate-500 uppercase tracking-wide">
               No login activity yet.
             </div>
           ) : (
-            recentLogins.map((login) => (
-              <div key={login.id} className="flex items-center justify-between gap-4 p-4 bg-slate-50 border-2 border-slate-800 rounded-2xl">
+            groupedRecentLogins.map((login) => (
+              <div key={login.key} className="flex flex-col gap-3 p-4 bg-slate-50 border-2 border-slate-800 rounded-2xl sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className={`w-10 h-10 rounded-xl border-2 border-slate-800 flex items-center justify-center shrink-0 ${
-                    isGoogleLogin(login) ? 'bg-sky-100' : 'bg-lime-100'
+                    login.loginBadge === 'Google' ? 'bg-sky-100' : 'bg-lime-100'
                   }`}>
-                    {isGoogleLogin(login) ? (
+                    {login.loginBadge === 'Google' ? (
                       <Mail className="w-5 h-5 text-sky-700" />
                     ) : (
                       <UserRound className="w-5 h-5 text-lime-700" />
@@ -375,19 +406,25 @@ export default function AdminPanel({ onBack }: Props) {
                   <div className="min-w-0">
                     <p className="font-black text-slate-800 text-sm uppercase truncate">{login.displayName}</p>
                     <p className="text-[10px] text-slate-500 font-mono tracking-tight truncate">
-                      {login.email || 'anonymous@guest'}
+                      {login.email}
                     </p>
                   </div>
                 </div>
-                <div className="text-right shrink-0">
+                <div className="flex flex-col gap-2 sm:items-end shrink-0">
                   <span className={`inline-flex px-2 py-1 rounded-md text-[9px] font-black uppercase border-2 ${
-                    isGoogleLogin(login)
+                    login.loginBadge === 'Google'
                       ? 'bg-sky-50 border-sky-500 text-sky-700'
                       : 'bg-lime-50 border-lime-500 text-lime-700'
                   }`}>
-                    {getLoginBadge(login)}
+                    {login.loginBadge}
                   </span>
-                  <p className="text-[10px] text-slate-400 font-bold mt-2 whitespace-nowrap">{formatLoginTime(login.timestamp)}</p>
+                  <div className="flex flex-col gap-1 text-left sm:text-right">
+                    {login.recentTimes.map((timestamp, index) => (
+                      <p key={`${login.key}-${index}`} className="text-[10px] text-slate-400 font-bold whitespace-nowrap">
+                        {index === 0 ? 'Latest:' : 'Previous:'} {formatLoginTime(timestamp)}
+                      </p>
+                    ))}
+                  </div>
                 </div>
               </div>
             ))

@@ -19,10 +19,13 @@ interface RankedPlayer extends Player {
 export default function Leaderboard({ players, matches }: Props) {
   const rankedPlayers = players.map((player) => ({
     ...player,
+    points: 0,
+    gamesPlayed: 0,
+    wins: 0,
     pointsFor: 0,
     pointsAgainst: 0,
-    pointDiff: player.points,
-    averageDiff: player.gamesPlayed > 0 ? player.points / player.gamesPlayed : 0,
+    pointDiff: 0,
+    averageDiff: 0,
     headToHead: new Map<string, number>()
   }));
 
@@ -31,9 +34,13 @@ export default function Leaderboard({ players, matches }: Props) {
   matches
     .filter((match) => match.status === 'completed')
     .forEach((match) => {
+      const team1Won = match.score1 > match.score2;
+
       match.team1.forEach((playerId) => {
         const player = playerMap.get(playerId);
         if (!player) return;
+        player.gamesPlayed += 1;
+        if (team1Won) player.wins += 1;
         player.pointsFor += match.score1;
         player.pointsAgainst += match.score2;
       });
@@ -41,6 +48,8 @@ export default function Leaderboard({ players, matches }: Props) {
       match.team2.forEach((playerId) => {
         const player = playerMap.get(playerId);
         if (!player) return;
+        player.gamesPlayed += 1;
+        if (!team1Won) player.wins += 1;
         player.pointsFor += match.score2;
         player.pointsAgainst += match.score1;
       });
@@ -66,6 +75,7 @@ export default function Leaderboard({ players, matches }: Props) {
 
   rankedPlayers.forEach((player) => {
     player.pointDiff = player.pointsFor - player.pointsAgainst;
+    player.points = player.pointDiff;
     player.averageDiff = player.gamesPlayed > 0 ? player.pointDiff / player.gamesPlayed : 0;
   });
 
