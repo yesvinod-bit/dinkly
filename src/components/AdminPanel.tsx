@@ -35,6 +35,7 @@ import {
   UserRound
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { buildInviteUrl, getPublicAppOrigin } from '../lib/appUrl';
 
 interface Props {
   onBack: () => void;
@@ -186,20 +187,7 @@ export default function AdminPanel({ onBack }: Props) {
   };
 
   const handleInvite = async (code: string, mode: 'share' | 'copy' = 'share') => {
-    // FORCE PUBLIC DOMAIN (ais-pre)
-    // We aggressively swap 'ais-dev' for 'ais-pre' because 'ais-dev' is 
-    // private to the developer and triggers the 403 forbidden bridge.
-    let currentUrl = window.location.href.split('?')[0]; // Current page minus params
-    
-    // Attempt standard swap
-    let baseUrl = currentUrl.replace('ais-dev-', 'ais-pre-');
-    
-    // Ensure we don't have trailing slash issues causing double slashes
-    if (baseUrl.endsWith('/')) {
-      baseUrl = baseUrl.slice(0, -1);
-    }
-    
-    const url = `${baseUrl}?invite=${code}`;
+    const url = buildInviteUrl(window.location.origin, code);
     const shareTitle = '🏓 Court\'s Open! You\'re Invited to Dinkly!';
     const shareText = `Hey! I've added you to our private Pickleball circle. Use this app to manage tournaments and track live scores! 🥂\n\nJoin here: ${url} 🔥`;
 
@@ -264,7 +252,7 @@ export default function AdminPanel({ onBack }: Props) {
               <h2 className="text-xl font-black text-slate-800 uppercase italic">Invite Codes</h2>
               <p className="mt-1 flex items-center gap-1 text-[9px] font-black uppercase tracking-tight text-emerald-500 break-all">
                 <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shrink-0" />
-                Sharing from: {window.location.origin.includes('ais-dev-') ? window.location.origin.replace('ais-dev-', 'ais-pre-') : window.location.origin}
+                Sharing from: {getPublicAppOrigin(window.location.origin)}
               </p>
             </div>
           </div>
@@ -314,10 +302,10 @@ export default function AdminPanel({ onBack }: Props) {
                   <div className="bg-slate-50 border-2 border-slate-200 p-2 rounded-xl">
                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-tighter mb-1">Friends must use this URL:</p>
                     <code className="flex flex-col gap-2 rounded border border-emerald-100 bg-emerald-50 px-2 py-1 text-[10px] font-mono font-bold text-emerald-600 sm:flex-row sm:items-start sm:justify-between">
-                      <span className="break-all">{window.location.origin.replace('ais-dev-', 'ais-pre-')}?invite={invite.code}</span>
+                      <span className="break-all">{buildInviteUrl(window.location.origin, invite.code)}</span>
                       <button 
                         onClick={() => {
-                          navigator.clipboard.writeText(`${window.location.origin.replace('ais-dev-', 'ais-pre-')}?invite=${invite.code}`);
+                          navigator.clipboard.writeText(buildInviteUrl(window.location.origin, invite.code));
                           setCopiedId(invite.code + '_link');
                           setTimeout(() => setCopiedId(null), 2000);
                         }}

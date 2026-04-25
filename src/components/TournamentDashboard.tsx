@@ -35,6 +35,7 @@ import Leaderboard from './Leaderboard';
 import MatchList from './MatchList';
 import PlayerManager from './PlayerManager';
 import { motion, AnimatePresence } from 'motion/react';
+import { buildSpectatorUrl, getPublicAppUrl } from '../lib/appUrl';
 
 interface Props {
   tournamentId: string;
@@ -193,10 +194,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   };
 
   const shareCode = () => {
-    let url = window.location.href;
-    if (url.includes('ais-dev-')) {
-      url = url.replace('ais-dev-', 'ais-pre-');
-    }
+    const url = getPublicAppUrl(window.location.href);
 
     if (navigator.share) {
       navigator.share({
@@ -338,11 +336,11 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
            <div className="flex items-center gap-2 bg-white p-2 rounded-xl border-2 border-slate-200 shadow-sm">
              <span className="text-[10px] font-black text-slate-400 uppercase">Spectator URL:</span>
              <code className="text-[10px] font-mono font-bold text-slate-600 bg-slate-50 px-2 py-1 rounded truncate max-w-[150px] md:max-w-xs block">
-               {window.location.origin.replace('ais-dev-', 'ais-pre-')}?view={tournamentId}
+               {buildSpectatorUrl(window.location.origin, tournamentId)}
              </code>
              <button
                onClick={() => {
-                 const spectatorUrl = `${window.location.origin.replace('ais-dev-', 'ais-pre-')}?view=${tournamentId}`;
+                 const spectatorUrl = buildSpectatorUrl(window.location.origin, tournamentId);
                  navigator.clipboard.writeText(`Watch our Pickleball tournament live here (No signup required!): ${spectatorUrl}`);
                  alert('Spectator link copied!');
                }}

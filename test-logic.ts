@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import type { Match } from './src/lib/firebase.ts';
+import { buildInviteUrl, buildSpectatorUrl, getPublicAppOrigin, getPublicAppUrl } from './src/lib/appUrl.ts';
 import { generateRoundMatches, getMinimumPlayers, getTournamentFormat } from './src/lib/tournamentLogic.ts';
 
 type MockPlayer = {
@@ -128,12 +129,27 @@ function testDoublesBenchRotation() {
   assert.equal(benchCounts.size, 5, 'all doubles players should rotate through the bench over 5 rounds');
 }
 
+function testPublicAppUrls() {
+  assert.equal(getPublicAppOrigin('https://dinkly.net'), 'https://dinkly.net');
+  assert.equal(
+    getPublicAppOrigin('https://ais-dev-dinkly.example.com'),
+    'https://ais-pre-dinkly.example.com',
+  );
+  assert.equal(
+    getPublicAppUrl('https://ais-dev-dinkly.example.com/?view=abc'),
+    'https://ais-pre-dinkly.example.com/?view=abc',
+  );
+  assert.equal(buildInviteUrl('https://dinkly.net', 'JOIN123'), 'https://dinkly.net/?invite=JOIN123');
+  assert.equal(buildSpectatorUrl('https://dinkly.net', 'tour-1'), 'https://dinkly.net/?view=tour-1');
+}
+
 function main() {
   testTournamentFormats();
   testSinglesRoundGeneration();
   testDoublesRoundGeneration();
   testSinglesBenchRotation();
   testDoublesBenchRotation();
+  testPublicAppUrls();
   console.log('logic tests passed');
 }
 
