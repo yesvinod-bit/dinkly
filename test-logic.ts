@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import type { Match } from './src/lib/firebase.ts';
 import { generateRoundMatches, getMinimumPlayers, getTournamentFormat } from './src/lib/tournamentLogic.ts';
 
 type MockPlayer = {
@@ -23,6 +24,31 @@ const mockPlayers = (count: number): MockPlayer[] =>
 function assertUniquePlayersPerRound(matches: ReturnType<typeof generateRoundMatches>) {
   const allPlayers = matches.flatMap((match) => [...(match.team1 ?? []), ...(match.team2 ?? [])]);
   assert.equal(new Set(allPlayers).size, allPlayers.length, 'players should not be duplicated within a round');
+}
+
+function getBenchedPlayerIds(players: MockPlayer[], matches: ReturnType<typeof generateRoundMatches>) {
+  const activePlayerIds = new Set(matches.flatMap((match) => [...(match.team1 ?? []), ...(match.team2 ?? [])]));
+  return players
+    .map((player) => player.id)
+    .filter((playerId) => !activePlayerIds.has(playerId))
+    .sort();
+}
+
+function toHistoryMatches(matches: ReturnType<typeof generateRoundMatches>, round: number): Match[] {
+  return matches.map((match, index) => ({
+    id: `r${round}-m${index}`,
+    round,
+    team1: match.team1 ?? [],
+    team2: match.team2 ?? [],
+    score1: match.score1 ?? 0,
+    score2: match.score2 ?? 0,
+    status: match.status ?? 'pending',
+    updatedAt: {
+      toMillis: () => round * 1000 + index,
+      seconds: round,
+      nanoseconds: index,
+    } as any,
+  }));
 }
 
 function testTournamentFormats() {
@@ -56,10 +82,58 @@ function testDoublesRoundGeneration() {
   assertUniquePlayersPerRound(ninePlayers);
 }
 
+function testSinglesBenchRotation() {
+  const players = mockPlayers(3) as any as MockPlayer[];
+  const benchCounts = new Map<string, number>();
+  let history: Match[] = [];
+  let previousBenched: string[] = [];
+
+  for (let round = 1; round <= 3; round += 1) {
+    const roundMatches = generateRoundMatches(players as any, round, 'singles', history);
+    const benchedPlayerIds = getBenchedPlayerIds(players, roundMatches);
+
+    assert.equal(benchedPlayerIds.length, 1, '3 singles players should bench exactly 1 player');
+    if (previousBenched.length > 0) {
+      assert.notDeepEqual(benchedPlayerIds, previousBenched, 'the same singles player should not be benched in back-to-back rounds');
+    }
+
+    benchCounts.set(benchedPlayerIds[0], (benchCounts.get(benchedPlayerIds[0]) || 0) + 1);
+    history = [...history, ...toHistoryMatches(roundMatches, round)];
+    previousBenched = benchedPlayerIds;
+  }
+
+  assert.equal(benchCounts.size, 3, 'all singles players should rotate through the bench over 3 rounds');
+}
+
+function testDoublesBenchRotation() {
+  const players = mockPlayers(5) as any as MockPlayer[];
+  const benchCounts = new Map<string, number>();
+  let history: Match[] = [];
+  let previousBenched: string[] = [];
+
+  for (let round = 1; round <= 5; round += 1) {
+    const roundMatches = generateRoundMatches(players as any, round, 'doubles', history);
+    const benchedPlayerIds = getBenchedPlayerIds(players, roundMatches);
+
+    assert.equal(benchedPlayerIds.length, 1, '5 doubles players should bench exactly 1 player');
+    if (previousBenched.length > 0) {
+      assert.notDeepEqual(benchedPlayerIds, previousBenched, 'the same doubles player should not be benched in back-to-back rounds');
+    }
+
+    benchCounts.set(benchedPlayerIds[0], (benchCounts.get(benchedPlayerIds[0]) || 0) + 1);
+    history = [...history, ...toHistoryMatches(roundMatches, round)];
+    previousBenched = benchedPlayerIds;
+  }
+
+  assert.equal(benchCounts.size, 5, 'all doubles players should rotate through the bench over 5 rounds');
+}
+
 function main() {
   testTournamentFormats();
   testSinglesRoundGeneration();
   testDoublesRoundGeneration();
+  testSinglesBenchRotation();
+  testDoublesBenchRotation();
   console.log('logic tests passed');
 }
 

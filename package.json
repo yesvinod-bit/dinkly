@@ -10,7 +10,7 @@
     "start": "node server.cjs",
     "lint": "tsc --noEmit",
     "test:logic": "node --experimental-strip-types --experimental-specifier-resolution=node ./test-logic.ts",
-    "deploy": "node ./scripts/deploy-run.mjs",
+    "deploy": "node ./scripts/deploy-run-direct.mjs",
     "hosting:emulate": "XDG_CONFIG_HOME=.config FIREBASE_TOOLS_DISABLE_UPDATE_CHECK=1 firebase emulators:start --only hosting",
     "hosting:deploy": "XDG_CONFIG_HOME=.config FIREBASE_TOOLS_DISABLE_UPDATE_CHECK=1 firebase deploy --only hosting"
   },

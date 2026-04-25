@@ -29,11 +29,42 @@ const TournamentDashboard = lazy(() => import('./components/TournamentDashboard'
 const Gatekeeper = lazy(() => import('./components/Gatekeeper'));
 const AdminPanel = lazy(() => import('./components/AdminPanel'));
 
+function BrandMark({ size = 'md', withWordmark = false, subtitle }: { size?: 'sm' | 'md' | 'lg'; withWordmark?: boolean; subtitle?: string }) {
+  const shellSize = size === 'lg' ? 'h-20 w-20 rounded-[28px]' : size === 'sm' ? 'h-10 w-10 rounded-2xl' : 'h-12 w-12 rounded-3xl';
+  const imgSize = size === 'lg' ? 'h-14 w-14 rounded-3xl' : size === 'sm' ? 'h-7 w-7 rounded-xl' : 'h-8 w-8 rounded-2xl';
+  const titleSize = size === 'lg' ? 'text-4xl' : size === 'sm' ? 'text-lg' : 'text-2xl';
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className={`relative flex items-center justify-center border-4 border-slate-900 bg-[radial-gradient(circle_at_top_left,#fde68a_0%,#a3e635_26%,#0f172a_72%)] shadow-[6px_6px_0px_0px_rgba(30,41,59,1)] ${shellSize}`}>
+        <img
+          src="/icons/icon-192.png"
+          alt="Dinkly"
+          className={`${imgSize} border-2 border-white/40 object-cover shadow-[0_8px_24px_rgba(15,23,42,0.35)]`}
+        />
+      </div>
+      {withWordmark && (
+        <div>
+          <div className={`font-black uppercase tracking-tight text-lime-950 ${titleSize}`}>
+            Dink<span className="text-orange-500">ly</span>
+          </div>
+          {subtitle && (
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-lime-700">
+              {subtitle}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const LoadingOverlay = () => (
   <div className="fixed inset-0 bg-lime-50/80 backdrop-blur-sm z-[200] flex flex-col items-center justify-center">
     <div className="bg-white p-8 rounded-3xl border-4 border-slate-900 shadow-[8px_8px_0px_0px_rgba(30,41,59,1)] flex flex-col items-center">
+      <BrandMark size="md" withWordmark subtitle="Round Robin Mixer" />
       <Loader2 className="w-12 h-12 text-lime-500 animate-spin mb-4" />
-      <h2 className="text-xl font-black text-slate-800 uppercase italic tracking-tighter">Dinkly Loading...</h2>
+      <h2 className="text-xl font-black text-slate-800 uppercase italic tracking-tighter">Loading the court...</h2>
     </div>
   </div>
 );
@@ -656,14 +687,17 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="max-w-md w-full brutal-card p-8 text-center"
         >
-          <div className="w-20 h-20 bg-lime-100 rounded-3xl flex items-center justify-center mx-auto mb-6 border-4 border-slate-800 rotate-3">
-            <Trophy className="w-10 h-10 text-lime-600" />
+          <div className="mb-6 flex justify-center">
+            <BrandMark size="lg" />
           </div>
-          <h1 className="text-4xl font-black text-lime-900 tracking-tight mb-2 uppercase">
-            DINK<span className="text-orange-500">LY</span>
+          <h1 className="text-4xl font-black text-lime-950 tracking-tight mb-2 uppercase">
+            Dink<span className="text-orange-500">ly</span>
           </h1>
-          <p className="text-lime-700 font-bold uppercase text-xs tracking-widest mb-8">
+          <p className="text-lime-700 font-bold uppercase text-xs tracking-[0.24em] mb-2">
             Round Robin Mixer
+          </p>
+          <p className="mb-8 text-sm font-bold text-slate-600">
+            Live pairings, fast score entry, and a courtside view that feels like an app.
           </p>
           <button
             onClick={handleSignIn}
@@ -764,10 +798,17 @@ export default function App() {
       <div className="max-w-xl mx-auto">
         <header className="flex items-center justify-between mb-8 md:mb-12">
           <div>
-            <h1 className="text-xl md:text-3xl font-black text-lime-900 tracking-tight uppercase flex items-center gap-2">
-              <span className="w-8 h-8 md:w-10 md:h-10 bg-lime-400 border-2 md:border-4 border-slate-900 rounded-xl flex items-center justify-center -rotate-3 text-slate-900 text-sm md:text-lg">D</span>
-              {isAdminMode ? 'Admin Central' : 'Dinkly'}
-            </h1>
+            <div className="flex items-center gap-3">
+              <BrandMark size="sm" />
+              <div>
+                <h1 className="text-xl md:text-3xl font-black text-lime-900 tracking-tight uppercase leading-none">
+                  {isAdminMode ? 'Admin Central' : 'Dinkly'}
+                </h1>
+                <p className="mt-1 text-[8px] md:text-[10px] font-black uppercase tracking-[0.22em] text-lime-700">
+                  {isAdminMode ? 'Control Room' : 'Pickleball Mixer'}
+                </p>
+              </div>
+            </div>
             <p className="text-lime-700 font-bold uppercase text-[8px] md:text-[10px] tracking-widest">
               Active Player: {getUserLabel(user)}
             </p>
