@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import type { Match } from './src/lib/firebase.ts';
 import { buildInviteUrl, buildSpectatorUrl, getPublicAppOrigin, getPublicAppUrl } from './src/lib/appUrl.ts';
-import { generateRoundMatches, getMinimumPlayers, getTournamentFormat } from './src/lib/tournamentLogic.ts';
+import { buildProfileAdvice, type ProfileAdviceStats } from './src/lib/profileAdvice.ts';
+import {
+  buildSeededPlayoffMatches,
+  generateRoundMatches,
+  getFixedPairingStatus,
+  getFixedPairStandings,
+  getMinimumPlayers,
+  getTournamentFormat,
+  getTournamentPairingMode,
+  type SeededPlayoffPair,
+} from './src/lib/tournamentLogic.ts';
 
 type MockPlayer = {
   id: string;
@@ -10,6 +20,7 @@ type MockPlayer = {
   gamesPlayed: number;
   wins: number;
   addedAt: unknown;
+  fixedPairId?: string;
 };
 
 const mockPlayers = (count: number): MockPlayer[] =>
@@ -56,6 +67,9 @@ function testTournamentFormats() {
   assert.equal(getTournamentFormat('singles'), 'singles');
   assert.equal(getTournamentFormat('doubles'), 'doubles');
   assert.equal(getTournamentFormat(undefined), 'doubles');
+  assert.equal(getTournamentPairingMode(undefined, 'doubles'), 'random');
+  assert.equal(getTournamentPairingMode('fixed', 'doubles'), 'fixed');
+  assert.equal(getTournamentPairingMode('fixed', 'singles'), 'random');
   assert.equal(getMinimumPlayers('singles'), 2);
   assert.equal(getMinimumPlayers('doubles'), 4);
 }
@@ -129,6 +143,111 @@ function testDoublesBenchRotation() {
   assert.equal(benchCounts.size, 5, 'all doubles players should rotate through the bench over 5 rounds');
 }
 
+function testFixedPairValidation() {
+  const players = mockPlayers(4) as any as MockPlayer[];
+  players[0].fixedPairId = 'pair-a';
+  players[1].fixedPairId = 'pair-a';
+  players[2].fixedPairId = 'pair-b';
+
+  const incompleteStatus = getFixedPairingStatus(players as any);
+  assert.equal(incompleteStatus.isReady, false, 'fixed mode should require every player to be paired');
+
+  players[3].fixedPairId = 'pair-b';
+  const readyStatus = getFixedPairingStatus(players as any);
+  assert.equal(readyStatus.isReady, true, 'two complete fixed pairs should be ready');
+  assert.equal(readyStatus.pairs.length, 2);
+}
+
+function testFixedPairRoundGeneration() {
+  const players = mockPlayers(6) as any as MockPlayer[];
+  players[0].fixedPairId = 'pair-a';
+  players[1].fixedPairId = 'pair-a';
+  players[2].fixedPairId = 'pair-b';
+  players[3].fixedPairId = 'pair-b';
+  players[4].fixedPairId = 'pair-c';
+  players[5].fixedPairId = 'pair-c';
+
+  const firstRound = generateRoundMatches(players as any, 1, 'doubles', [], 'fixed');
+  assert.equal(firstRound.length, 1, '3 fixed pairs should produce one match and bench one pair');
+  assertUniquePlayersPerRound(firstRound);
+  [firstRound[0].team1, firstRound[0].team2].forEach((team) => {
+    assert.ok(team, 'fixed pair team should exist');
+    const pairIds = new Set(team?.map((playerId) => players.find((player) => player.id === playerId)?.fixedPairId));
+    assert.equal(pairIds.size, 1, 'fixed pair teammates should stay together');
+  });
+
+  const history = toHistoryMatches(firstRound, 1);
+  const secondRound = generateRoundMatches(players as any, 2, 'doubles', history, 'fixed');
+  assert.equal(secondRound.length, 1, 'fixed pair mode should keep generating pair-vs-pair rounds');
+  assertUniquePlayersPerRound(secondRound);
+}
+
+function testFixedPairStandingsByStage() {
+  const players = mockPlayers(4) as any as MockPlayer[];
+  players[0].fixedPairId = 'pair-a';
+  players[1].fixedPairId = 'pair-a';
+  players[2].fixedPairId = 'pair-b';
+  players[3].fixedPairId = 'pair-b';
+
+  const matches: Match[] = [
+    {
+      id: 'prelim-1',
+      round: 1,
+      team1: ['p0', 'p1'],
+      team2: ['p2', 'p3'],
+      score1: 11,
+      score2: 5,
+      status: 'completed',
+      updatedAt: { toMillis: () => 1000, seconds: 1, nanoseconds: 0 } as any,
+    },
+    {
+      id: 'playoff-1',
+      round: 2,
+      stage: 'playoff',
+      playoffRound: 1,
+      roundLabel: 'Playoff Final',
+      seed1: 1,
+      seed2: 2,
+      team1: ['p0', 'p1'],
+      team2: ['p2', 'p3'],
+      score1: 4,
+      score2: 11,
+      status: 'completed',
+      updatedAt: { toMillis: () => 2000, seconds: 2, nanoseconds: 0 } as any,
+    },
+  ];
+
+  const preliminary = getFixedPairStandings(players as any, matches, 'preliminary');
+  const playoff = getFixedPairStandings(players as any, matches, 'playoff');
+
+  assert.equal(preliminary.find((standing) => standing.id === 'pair-a')?.wins, 1);
+  assert.equal(preliminary.find((standing) => standing.id === 'pair-b')?.wins, 0);
+  assert.equal(playoff.find((standing) => standing.id === 'pair-a')?.wins, 0);
+  assert.equal(playoff.find((standing) => standing.id === 'pair-b')?.wins, 1);
+  assert.equal(playoff.find((standing) => standing.id === 'pair-b')?.gamesPlayed, 1);
+}
+
+function testSeededPlayoffMatchGeneration() {
+  const seededPairs: SeededPlayoffPair[] = [
+    { id: 'pair-a', playerIds: ['p0', 'p1'], label: 'Pair A', seed: 1 },
+    { id: 'pair-b', playerIds: ['p2', 'p3'], label: 'Pair B', seed: 2 },
+    { id: 'pair-c', playerIds: ['p4', 'p5'], label: 'Pair C', seed: 3 },
+    { id: 'pair-d', playerIds: ['p6', 'p7'], label: 'Pair D', seed: 4 },
+  ];
+
+  const matches = buildSeededPlayoffMatches(seededPairs, 7, 1);
+
+  assert.equal(matches.length, 2);
+  assert.equal(matches[0].stage, 'playoff');
+  assert.equal(matches[0].roundLabel, 'Playoff Semifinal');
+  assert.equal(matches[0].seed1, 1);
+  assert.equal(matches[0].seed2, 4);
+  assert.deepEqual(matches[0].team1, ['p0', 'p1']);
+  assert.deepEqual(matches[0].team2, ['p6', 'p7']);
+  assert.equal(matches[1].seed1, 2);
+  assert.equal(matches[1].seed2, 3);
+}
+
 function testPublicAppUrls() {
   assert.equal(getPublicAppOrigin('https://dinkly.net'), 'https://dinkly.net');
   assert.equal(
@@ -143,13 +262,71 @@ function testPublicAppUrls() {
   assert.equal(buildSpectatorUrl('https://dinkly.net', 'tour-1'), 'https://dinkly.net/?view=tour-1');
 }
 
+function makeProfileAdviceStats(overrides: Partial<ProfileAdviceStats>): ProfileAdviceStats {
+  return {
+    displayName: 'Test Player',
+    totalGames: 10,
+    totalWins: 5,
+    totalPoints: 100,
+    winRate: 50,
+    formatBreakdown: {
+      doubles: { tournaments: 1, games: 10, wins: 5, points: 100, winRate: 50 },
+      singles: { tournaments: 0, games: 0, wins: 0, points: 0, winRate: 0 },
+    },
+    ...overrides,
+  };
+}
+
+function testProfileAdvice() {
+  const highScoreAdvice = buildProfileAdvice(makeProfileAdviceStats({
+    totalWins: 8,
+    totalPoints: 150,
+    winRate: 80,
+    formatBreakdown: {
+      doubles: { tournaments: 2, games: 10, wins: 8, points: 150, winRate: 80 },
+      singles: { tournaments: 0, games: 0, wins: 0, points: 0, winRate: 0 },
+    },
+  }), 'doubles', 1);
+  assert.equal(highScoreAdvice.tone, 'humbling');
+
+  const lowScoreAdvice = buildProfileAdvice(makeProfileAdviceStats({
+    totalWins: 1,
+    totalPoints: 35,
+    winRate: 10,
+    formatBreakdown: {
+      doubles: { tournaments: 1, games: 10, wins: 1, points: 35, winRate: 10 },
+      singles: { tournaments: 0, games: 0, wins: 0, points: 0, winRate: 0 },
+    },
+  }), 'doubles', 1);
+  assert.equal(lowScoreAdvice.tone, 'motivating');
+
+  const refreshedAdvice = buildProfileAdvice(makeProfileAdviceStats({}), 'doubles', 2);
+  assert.notEqual(
+    buildProfileAdvice(makeProfileAdviceStats({}), 'doubles', 3).message,
+    refreshedAdvice.message,
+    'changing the nonce should rotate the advice pool'
+  );
+
+  const sampledMessages = new Set(
+    Array.from({ length: 40 }, (_, index) => (
+      buildProfileAdvice(makeProfileAdviceStats({}), 'doubles', index).message
+    ))
+  );
+  assert.ok(sampledMessages.size >= 30, 'profile advice should have a broad dynamic message range');
+}
+
 function main() {
   testTournamentFormats();
   testSinglesRoundGeneration();
   testDoublesRoundGeneration();
   testSinglesBenchRotation();
   testDoublesBenchRotation();
+  testFixedPairValidation();
+  testFixedPairRoundGeneration();
+  testFixedPairStandingsByStage();
+  testSeededPlayoffMatchGeneration();
   testPublicAppUrls();
+  testProfileAdvice();
   console.log('logic tests passed');
 }
 

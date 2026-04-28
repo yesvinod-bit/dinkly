@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dinkly-shell-v1';
+const CACHE_NAME = 'dinkly-shell-v2';
 const APP_SHELL = [
   '/',
   '/manifest.json',
@@ -11,7 +11,9 @@ const APP_SHELL = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then((cache) => (
+      Promise.allSettled(APP_SHELL.map((url) => cache.add(url)))
+    ))
   );
   self.skipWaiting();
 });
@@ -52,10 +54,22 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then(async (cached) => {
       if (cached) {
+        event.waitUntil(
+          fetch(event.request)
+            .then(async (response) => {
+              if (!response || response.status !== 200) return;
+              const cache = await caches.open(CACHE_NAME);
+              await cache.put(event.request, response.clone());
+            })
+            .catch(() => undefined)
+        );
         return cached;
       }
 
       const response = await fetch(event.request);
+      if (!response || response.status !== 200) {
+        return response;
+      }
       const cache = await caches.open(CACHE_NAME);
       cache.put(event.request, response.clone());
       return response;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Suspense, lazy } from 'react';
 import { 
   onAuthStateChanged, 
   User 
@@ -19,9 +19,16 @@ import {
   limit,
   Timestamp
 } from 'firebase/firestore';
-import { auth, db, signIn, logout, Tournament, TournamentFormat, handleFirestoreError } from './lib/firebase';
-import { DEFAULT_TOURNAMENT_FORMAT, generateCode, getTournamentFormat, getTournamentFormatTag } from './lib/tournamentLogic';
-import { Trophy, Users, Plus, Hash, LogOut, ChevronRight, History, Calendar, Bell, X, Shield, Loader2, CheckSquare, Square, Trash2, BadgeCheck } from 'lucide-react';
+import { auth, db, signIn, logout, Tournament, TournamentFormat, TournamentPairingMode, handleFirestoreError } from './lib/firebase';
+import {
+  DEFAULT_TOURNAMENT_FORMAT,
+  DEFAULT_TOURNAMENT_PAIRING_MODE,
+  generateCode,
+  getTournamentFormat,
+  getTournamentFormatTag
+} from './lib/tournamentLogic';
+import { Trophy, Users, Plus, Hash, LogOut, ChevronRight, History, Calendar, Bell, X, Shield, Loader2, CheckSquare, Square, Trash2, BadgeCheck, Download, Home, Activity, PlayCircle, RefreshCw, Sparkles, Shuffle, Link2 } from 'lucide-react';
+import { buildProfileAdvice } from './lib/profileAdvice';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Lazy load heavy components
@@ -125,7 +132,17 @@ interface LoginEvent {
   timestamp: any;
 }
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+}
+
 const LOGIN_SESSION_PREFIX = 'dinkly:login-recorded:';
+const PROFILE_ADVICE_REFRESH_MS = 20_000;
+
+function isRunningStandalone(): boolean {
+  return window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
 
 function getAuthErrorMessage(error: unknown): string {
   const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: string }).code) : '';
@@ -171,6 +188,7 @@ export default function App() {
   const [joinCode, setJoinCode] = useState('');
   const [newTourneyName, setNewTourneyName] = useState('');
   const [newTournamentFormat, setNewTournamentFormat] = useState<TournamentFormat>(DEFAULT_TOURNAMENT_FORMAT);
+  const [newTournamentPairingMode, setNewTournamentPairingMode] = useState<TournamentPairingMode>(DEFAULT_TOURNAMENT_PAIRING_MODE);
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -184,10 +202,20 @@ export default function App() {
   const [playerProfileError, setPlayerProfileError] = useState<string | null>(null);
   const [isPlayerProfileOpen, setIsPlayerProfileOpen] = useState(false);
   const [selectedProfileFormat, setSelectedProfileFormat] = useState<TournamentFormat>('doubles');
+  const [profileAdviceNonce, setProfileAdviceNonce] = useState(() => Date.now());
   const [isJoiningSharedTournament, setIsJoiningSharedTournament] = useState(false);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isAppInstalled, setIsAppInstalled] = useState(() => typeof window !== 'undefined' && isRunningStandalone());
+  const [homeView, setHomeView] = useState<'home' | 'activity' | 'profile'>('home');
   const historyFormatCacheRef = useRef(new Map<string, TournamentFormat>());
 
   const adminEmail = 'yes.vinod@gmail.com';
+  const isFirstRun = history.length === 0 && !isPlayerProfileLoading;
+  const profileAdvice = useMemo(() => (
+    playerProfile
+      ? buildProfileAdvice(playerProfile, selectedProfileFormat, profileAdviceNonce)
+      : null
+  ), [playerProfile, profileAdviceNonce, selectedProfileFormat]);
 
   const mergeHistoryItem = (nextItem: HistoryItem) => {
     setHistory((prev) => {
@@ -403,6 +431,26 @@ export default function App() {
     });
   }, []);
 
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setDeferredInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+
+    const handleInstalled = () => {
+      setDeferredInstallPrompt(null);
+      setIsAppInstalled(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleInstalled);
+    };
+  }, []);
+
   const recordLogin = async (u: User) => {
     const sessionKey = `${LOGIN_SESSION_PREFIX}${u.uid}`;
     if (typeof window !== 'undefined' && window.sessionStorage.getItem(sessionKey)) {
@@ -431,21 +479,22 @@ export default function App() {
 
   useEffect(() => {
     if (!user || !isVerified) return;
-    if (activeTournamentId || sharedTournamentId || isAdminMode) return;
-
-    void (async () => {
-      try {
-        const historyItems = await loadUserHistory(user.uid);
-        await loadPlayerProfile(user.uid, historyItems);
-      } catch (err) {
-        console.error('History load error:', err);
-        setLoading(false);
-      }
-    })();
-
     let unsubLogins: (() => void) | undefined;
+    const isOnTournamentView = Boolean(activeTournamentId || sharedTournamentId);
 
-    if (user.email === adminEmail && isAdminMode) {
+    if (!isOnTournamentView && !isAdminMode) {
+      void (async () => {
+        try {
+          const historyItems = await loadUserHistory(user.uid);
+          await loadPlayerProfile(user.uid, historyItems);
+        } catch (err) {
+          console.error('History load error:', err);
+          setLoading(false);
+        }
+      })();
+    }
+
+    if (!isOnTournamentView && user.email === adminEmail && isAdminMode) {
       const now = Timestamp.now();
       const qLogins = query(
         collection(db, 'logins'),
@@ -478,6 +527,18 @@ export default function App() {
       unsubLogins?.();
     };
   }, [user, isVerified, isAdminMode, activeTournamentId, sharedTournamentId]);
+
+  const handleInstallApp = async () => {
+    if (!deferredInstallPrompt) return;
+
+    const promptEvent = deferredInstallPrompt;
+    setDeferredInstallPrompt(null);
+    await promptEvent.prompt();
+    const choice = await promptEvent.userChoice;
+    if (choice.outcome === 'accepted') {
+      setIsAppInstalled(true);
+    }
+  };
 
   useEffect(() => {
     if (!user || !isVerified || !sharedTournamentId) return;
@@ -536,6 +597,36 @@ export default function App() {
     }
   }, [playerProfile]);
 
+  useEffect(() => {
+    if (homeView === 'profile' && playerProfile) {
+      setProfileAdviceNonce(Date.now());
+    }
+  }, [homeView, playerProfile?.totalGames, playerProfile?.totalPoints, playerProfile?.totalWins, playerProfile?.winRate]);
+
+  useEffect(() => {
+    if (homeView !== 'profile' || !playerProfile) return;
+
+    const refreshAdvice = () => {
+      if (document.visibilityState === 'visible') {
+        setProfileAdviceNonce((current) => current + 1);
+      }
+    };
+
+    const intervalId = window.setInterval(refreshAdvice, PROFILE_ADVICE_REFRESH_MS);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshAdvice();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [homeView, playerProfile, selectedProfileFormat]);
+
   const recordTournamentJoin = async (
     tId: string,
     name: string,
@@ -576,6 +667,7 @@ export default function App() {
         code,
         ownerId: user.uid,
         format: newTournamentFormat,
+        pairingMode: newTournamentFormat === 'doubles' ? newTournamentPairingMode : DEFAULT_TOURNAMENT_PAIRING_MODE,
         status: 'setup',
         createdAt: serverTimestamp(),
       });
@@ -709,6 +801,18 @@ export default function App() {
           <p className="mt-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
             Google sign-in is required for everyone.
           </p>
+          {deferredInstallPrompt && !isAppInstalled && (
+            <button
+              type="button"
+              onClick={handleInstallApp}
+              className="mt-4 w-full rounded-2xl border-2 border-slate-800 bg-white px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none"
+            >
+              <span className="inline-flex items-center justify-center gap-2">
+                <Download className="h-4 w-4" />
+                Install Dinkly
+              </span>
+            </button>
+          )}
           {authError && (
             <div className="mt-4 bg-orange-50 border-2 border-orange-200 text-orange-700 px-4 py-3 rounded-xl font-bold text-sm text-left">
               {authError}
@@ -762,7 +866,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-lime-50 p-3 md:p-8">
+    <div className="min-h-screen bg-lime-50 p-3 pb-24 transition-colors md:p-8">
       {/* Notifications Overlay */}
       <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
         <AnimatePresence>
@@ -795,8 +899,9 @@ export default function App() {
         </AnimatePresence>
       </div>
 
-      <div className="max-w-xl mx-auto">
-        <header className="flex items-center justify-between mb-8 md:mb-12">
+      <div className="max-w-3xl mx-auto">
+        <header className="mb-5 rounded-2xl border-2 border-slate-800 bg-white/95 p-3 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] backdrop-blur md:mb-8 md:p-5">
+          <div className="flex items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-3">
               <BrandMark size="sm" />
@@ -809,15 +914,18 @@ export default function App() {
                 </p>
               </div>
             </div>
-            <p className="text-lime-700 font-bold uppercase text-[8px] md:text-[10px] tracking-widest">
+            <p className="mt-2 text-lime-700 font-bold uppercase text-[8px] md:text-[10px] tracking-widest">
               Active Player: {getUserLabel(user)}
             </p>
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => setIsPlayerProfileOpen((prev) => !prev)}
+              onClick={() => {
+                setHomeView('profile');
+                setIsPlayerProfileOpen(true);
+              }}
               className={`p-2 md:p-3 border-2 md:border-4 border-slate-800 rounded-xl md:rounded-2xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] md:shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] transition-all ${
-                isPlayerProfileOpen ? 'bg-sky-400 text-slate-900' : 'bg-white text-slate-800'
+                homeView === 'profile' || isPlayerProfileOpen ? 'bg-sky-400 text-slate-900' : 'bg-white text-slate-800'
               }`}
               title="My Profile"
             >
@@ -825,62 +933,133 @@ export default function App() {
             </button>
             {user.email === adminEmail && (
               <button 
-                onClick={() => setIsAdminMode(!isAdminMode)}
+                onClick={() => {
+                  setIsAdminMode(!isAdminMode);
+                  setHomeView('home');
+                }}
                 className={`p-2 md:p-3 border-2 md:border-4 border-slate-800 rounded-xl md:rounded-2xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] md:shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all ${
                   isAdminMode ? 'bg-orange-400 text-white' : 'bg-white text-slate-800'
                 }`}
+                title="Admin"
               >
                 <Shield className="w-4 h-4 md:w-5 md:h-5" />
               </button>
             )}
             <button 
               onClick={logout}
+              title="Sign out"
               className="p-2 md:p-3 bg-white border-2 md:border-4 border-slate-800 rounded-xl md:rounded-2xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] md:shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] text-slate-800 hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all"
             >
-              <LogOut className="w-4 h-4 md:w-5 md:w-5" />
+              <LogOut className="w-4 h-4 md:w-5 md:h-5" />
             </button>
           </div>
+          </div>
+
+          {!isAdminMode && (
+            <div className="mt-4 grid grid-cols-3 gap-2 md:hidden">
+              {[
+                { key: 'home', label: 'Home', icon: Home },
+                { key: 'activity', label: 'Activity', icon: Activity },
+                { key: 'profile', label: 'Profile', icon: BadgeCheck },
+              ].map((item) => {
+                const Icon = item.icon;
+                const isActive = homeView === item.key;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => {
+                      setHomeView(item.key as typeof homeView);
+                      setIsPlayerProfileOpen(item.key === 'profile');
+                    }}
+                    className={`flex min-h-11 items-center justify-center gap-2 rounded-xl border-2 border-slate-800 text-[10px] font-black uppercase ${
+                      isActive ? 'bg-lime-400 text-slate-900' : 'bg-white text-slate-700'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </header>
+
+        {!isAdminMode && (
+          <section className="mb-5 flex flex-wrap items-center gap-2">
+            <span className="status-pill border-slate-300 bg-white text-slate-600">
+              <Activity className="h-3.5 w-3.5" />
+              {history.length} saved
+            </span>
+          </section>
+        )}
 
         <Suspense fallback={<div className="p-12 text-center text-slate-400 font-bold animate-pulse uppercase tracking-widest">Loading View...</div>}>
           {isAdminMode ? (
             <AdminPanel onBack={() => setIsAdminMode(false)} />
           ) : (
             <>
-              {isPlayerProfileOpen && (
+              {homeView === 'home' && isFirstRun && (
+                <section className="mb-6 rounded-2xl border-2 border-slate-800 bg-white p-5 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)]">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-slate-800 bg-lime-400">
+                      <PlayCircle className="h-5 w-5 text-slate-900" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-black uppercase text-slate-900">Start your first mixer</h2>
+                  <p className="mt-1 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+                        Create a mixer or join by code to get started.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <a href="#create-mixer" className="rounded-xl border-2 border-slate-800 bg-lime-400 px-3 py-3 text-center text-[10px] font-black uppercase text-slate-900">
+                      Create mixer
+                    </a>
+                    <a href="#join-mixer" className="rounded-xl border-2 border-slate-800 bg-white px-3 py-3 text-center text-[10px] font-black uppercase text-slate-800">
+                      Join code
+                    </a>
+                  </div>
+                </section>
+              )}
+
+              {homeView === 'profile' && (
                 <div className="mb-6 md:mb-8">
-                  <div className="overflow-hidden rounded-2xl md:rounded-3xl border-2 md:border-4 border-slate-800 bg-[linear-gradient(135deg,#082f49_0%,#0f172a_42%,#4c1d95_100%)] text-white shadow-[4px_4px_0px_0px_rgba(249,115,22,0.45)] md:shadow-[8px_8px_0px_0px_rgba(249,115,22,0.45)]">
-                    <div className="bg-[radial-gradient(circle_at_top_left,rgba(253,224,71,0.22),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(56,189,248,0.18),transparent_30%)] p-4 md:p-8">
+                  <div className="overflow-hidden rounded-2xl border-2 border-slate-800 bg-slate-900 text-white shadow-[3px_3px_0px_0px_rgba(56,189,248,1)]">
+                    <div className="p-4 md:p-6">
                     <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                       <div>
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">My Profile</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-sky-600">My Profile</p>
                         <h2 className="mt-2 text-2xl md:text-3xl font-black uppercase tracking-tight text-white">
                           {playerProfile?.displayName || getUserLabel(user)}
                         </h2>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <span className="inline-flex items-center gap-2 rounded-full border border-amber-300/40 bg-amber-300/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-amber-100">
+                          <span className="inline-flex items-center gap-2 rounded-full border border-sky-300 bg-sky-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-sky-700">
                             <BadgeCheck className="h-3 w-3" />
                             Verified Player
                           </span>
                           {playerProfile && playerProfile.claimedTournamentCount > 0 && (
-                            <span className="inline-flex items-center rounded-full border border-sky-300/40 bg-sky-300/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-sky-100">
+                            <span className="inline-flex items-center rounded-full border border-lime-300 bg-lime-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-lime-700">
                               {playerProfile.claimedTournamentCount} tournaments
                             </span>
                           )}
                           {playerProfile && playerProfile.totalGames > 0 && (
-                            <span className="inline-flex items-center rounded-full border border-lime-300/40 bg-lime-300/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-lime-100">
+                            <span className="inline-flex items-center rounded-full border border-orange-300 bg-orange-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-orange-700">
                               {playerProfile.winRate}% win rate
                             </span>
                           )}
                         </div>
-                        <p className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-200">
+                        <p className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-300">
                           Your Dinkly results across claimed tournaments.
                         </p>
                       </div>
                       <button
                         type="button"
-                        onClick={() => setIsPlayerProfileOpen(false)}
-                        className="rounded-2xl border-2 border-white/40 bg-white/10 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-white transition-all hover:bg-white/20"
+                        onClick={() => {
+                          setIsPlayerProfileOpen(false);
+                          setHomeView('home');
+                        }}
+                        className="rounded-2xl border-2 border-white/30 bg-white/10 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-white transition-all hover:bg-white/20"
                       >
                         Close Profile
                       </button>
@@ -892,6 +1071,47 @@ export default function App() {
                       </div>
                     ) : playerProfile && playerProfile.claimedTournamentCount > 0 ? (
                       <>
+                        {profileAdvice && (
+                          <div
+                            className={`mt-6 rounded-3xl border-2 p-4 shadow-[2px_2px_0px_0px_rgba(14,165,233,0.35)] md:p-5 ${
+                              profileAdvice.tone === 'humbling'
+                                ? 'border-orange-300/40 bg-[linear-gradient(135deg,rgba(251,146,60,0.24),rgba(248,113,113,0.14))]'
+                                : profileAdvice.tone === 'motivating'
+                                  ? 'border-lime-300/40 bg-[linear-gradient(135deg,rgba(163,230,53,0.22),rgba(45,212,191,0.12))]'
+                                  : profileAdvice.tone === 'new'
+                                    ? 'border-violet-300/40 bg-[linear-gradient(135deg,rgba(167,139,250,0.22),rgba(56,189,248,0.12))]'
+                                    : 'border-sky-300/40 bg-[linear-gradient(135deg,rgba(56,189,248,0.2),rgba(217,70,239,0.12))]'
+                            }`}
+                          >
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="flex gap-3">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/20 bg-white/10">
+                                  <Sparkles className="h-5 w-5 text-white" />
+                                </div>
+                                <div>
+                                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/70">
+                                    Courtside Advice
+                                  </p>
+                                  <h3 className="mt-1 text-lg font-black uppercase text-white">
+                                    {profileAdvice.title}
+                                  </h3>
+                                  <p className="mt-2 text-sm font-bold leading-relaxed text-white/90">
+                                    {profileAdvice.message}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setProfileAdviceNonce((current) => current + 1)}
+                                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-white/25 bg-white/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white transition-all hover:bg-white/20"
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                                New Roast
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
                         {(() => {
                           const activeFormatStats = playerProfile.formatBreakdown[selectedProfileFormat];
                           const alternateFormat: TournamentFormat = selectedProfileFormat === 'doubles' ? 'singles' : 'doubles';
@@ -1047,18 +1267,20 @@ export default function App() {
                 </div>
               )}
 
-              <div className="grid gap-4 md:gap-8">
+              {homeView === 'home' && (
+              <div className="grid gap-4 md:grid-cols-[1.05fr_0.95fr] md:gap-5">
                 <motion.div 
+                  id="create-mixer"
                   whileHover={{ scale: 1.01 }}
-                  className="bg-lime-400 border-2 md:border-4 border-slate-800 rounded-2xl md:rounded-3xl p-4 md:p-8 shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] md:shadow-[8px_8px_0px_0px_rgba(30,41,59,1)] cursor-pointer relative overflow-hidden group"
+                  className="bg-lime-400 border-2 border-slate-800 rounded-2xl p-4 md:p-5 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] cursor-pointer relative overflow-hidden group"
                   onClick={() => {}}
                 >
                   <div className="relative z-10">
-                    <div className="w-8 h-8 md:w-12 md:h-12 bg-white border-2 border-slate-800 rounded-lg md:rounded-xl flex items-center justify-center mb-3 md:mb-6">
+                    <div className="w-8 h-8 md:w-10 md:h-10 bg-white border-2 border-slate-800 rounded-lg md:rounded-xl flex items-center justify-center mb-3">
                       <Plus className="w-4 h-4 md:w-6 md:h-6 text-slate-800" />
                     </div>
-                    <h2 className="text-xl md:text-3xl font-black text-slate-800 mb-2 md:mb-4">NEW TOURNEY</h2>
-                    <div className="mb-3 md:mb-4">
+                    <h2 className="text-xl md:text-2xl font-black text-slate-800 mb-2 uppercase">Create Mixer</h2>
+                    <div className="mb-3">
                       <div className="flex items-center justify-between gap-3 mb-2">
                         <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-700">Format</span>
                         <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-700">
@@ -1072,7 +1294,7 @@ export default function App() {
                             e.stopPropagation();
                             setNewTournamentFormat('doubles');
                           }}
-                          className={`rounded-2xl border-4 px-3 py-3 text-left shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none ${
+                          className={`rounded-xl border-2 px-3 py-3 text-left shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none ${
                             newTournamentFormat === 'doubles'
                               ? 'border-slate-800 bg-white'
                               : 'border-slate-300 bg-lime-100/60 text-slate-500 shadow-none'
@@ -1089,8 +1311,9 @@ export default function App() {
                           onClick={(e) => {
                             e.stopPropagation();
                             setNewTournamentFormat('singles');
+                            setNewTournamentPairingMode(DEFAULT_TOURNAMENT_PAIRING_MODE);
                           }}
-                          className={`rounded-2xl border-4 px-3 py-3 text-left shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none ${
+                          className={`rounded-xl border-2 px-3 py-3 text-left shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none ${
                             newTournamentFormat === 'singles'
                               ? 'border-slate-800 bg-white'
                               : 'border-slate-300 bg-lime-100/60 text-slate-500 shadow-none'
@@ -1109,6 +1332,49 @@ export default function App() {
                           : 'Head-to-head rounds with one player per side.'}
                       </p>
                     </div>
+                    {newTournamentFormat === 'doubles' && (
+                      <div className="mb-3 flex items-center gap-2 rounded-xl border-2 border-slate-800 bg-white/45 p-1 shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]">
+                        <span className="px-2 text-[10px] font-black uppercase tracking-[0.16em] text-slate-700">
+                          Pairs
+                        </span>
+                        <div className="grid flex-1 grid-cols-2 gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setNewTournamentPairingMode('random');
+                            }}
+                            className={`flex min-h-9 items-center justify-center gap-1.5 rounded-lg border-2 px-2 text-[10px] font-black uppercase transition-all ${
+                              newTournamentPairingMode === 'random'
+                                ? 'border-slate-800 bg-lime-400 text-slate-900 shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]'
+                                : 'border-transparent bg-white/50 text-slate-500 hover:bg-white'
+                            }`}
+                            aria-pressed={newTournamentPairingMode === 'random'}
+                            title="Random Pair"
+                          >
+                            <Shuffle className="h-3.5 w-3.5" />
+                            Random
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setNewTournamentPairingMode('fixed');
+                            }}
+                            className={`flex min-h-9 items-center justify-center gap-1.5 rounded-lg border-2 px-2 text-[10px] font-black uppercase transition-all ${
+                              newTournamentPairingMode === 'fixed'
+                                ? 'border-slate-800 bg-orange-500 text-white shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]'
+                                : 'border-transparent bg-white/50 text-slate-500 hover:bg-white'
+                            }`}
+                            aria-pressed={newTournamentPairingMode === 'fixed'}
+                            title="Fixed Pair"
+                          >
+                            <Link2 className="h-3.5 w-3.5" />
+                            Fixed
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="flex flex-col sm:flex-row items-center gap-2 md:gap-3">
                       <input 
                         type="text" 
@@ -1130,8 +1396,9 @@ export default function App() {
                 </motion.div>
 
                 <motion.div 
+                  id="join-mixer"
                   whileHover={{ scale: 1.01 }}
-                  className="bg-white border-2 md:border-4 border-slate-800 rounded-2xl md:rounded-3xl p-4 md:p-8 shadow-[4px_4px_0px_0px_rgba(163,230,53,1)] md:shadow-[8px_8px_0px_0px_rgba(163,230,53,1)] group"
+                  className="bg-white border-2 border-slate-800 rounded-2xl p-4 shadow-[3px_3px_0px_0px_rgba(163,230,53,1)] group"
                 >
                   <div className="flex-1">
                     <div className="w-8 h-8 md:w-12 md:h-12 bg-lime-50 border-2 border-slate-800 rounded-lg md:rounded-xl flex items-center justify-center mb-3 md:mb-6">
@@ -1162,8 +1429,26 @@ export default function App() {
                   </div>
                 </motion.div>
               </div>
+              )}
 
-              {history.length > 0 && (
+              {homeView === 'activity' && history.length === 0 && (
+                <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white p-8 text-center">
+                  <History className="mx-auto h-10 w-10 text-lime-500" />
+                  <h2 className="mt-4 text-lg font-black uppercase text-slate-800">No activity yet</h2>
+                  <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    Create or join a mixer and it will stay here for quick resume.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setHomeView('home')}
+                    className="mt-5 brutal-button-lime text-xs"
+                  >
+                    Start from Home
+                  </button>
+                </div>
+              )}
+
+              {(homeView === 'activity' || (homeView === 'home' && history.length > 0)) && history.length > 0 && (
                 <div className="mt-8 md:mt-12">
                   <div className="mb-4 md:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <h2 className="text-lg md:text-2xl font-black text-slate-800 flex items-center gap-3 italic">
@@ -1267,6 +1552,34 @@ export default function App() {
             </>
           )}
         </Suspense>
+        {!isAdminMode && (
+          <nav className="fixed inset-x-3 bottom-3 z-50 mx-auto grid max-w-sm grid-cols-3 gap-2 rounded-2xl border-2 border-slate-800 bg-white/95 p-2 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] backdrop-blur md:hidden">
+            {[
+              { key: 'home', label: 'Home', icon: Home },
+              { key: 'activity', label: 'Active', icon: Activity },
+              { key: 'profile', label: 'Profile', icon: BadgeCheck },
+            ].map((item) => {
+              const Icon = item.icon;
+              const isActive = homeView === item.key;
+              return (
+                <button
+                  key={`bottom-${item.key}`}
+                  type="button"
+                  onClick={() => {
+                    setHomeView(item.key as typeof homeView);
+                    setIsPlayerProfileOpen(item.key === 'profile');
+                  }}
+                  className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl text-[9px] font-black uppercase ${
+                    isActive ? 'bg-lime-400 text-slate-900' : 'text-slate-500'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
+        )}
   </div>
 </div>
   );

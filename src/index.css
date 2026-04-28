@@ -8,23 +8,28 @@
 
 body {
   @apply bg-lime-50 text-slate-900 font-sans min-h-screen;
+  color-scheme: light;
 }
 
 @layer components {
   .brutal-card {
-    @apply bg-white border-2 border-slate-800 shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] rounded-2xl md:border-4 md:shadow-[8px_8px_0px_0px_rgba(30,41,59,1)] md:rounded-3xl;
+    @apply bg-white border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] rounded-2xl md:shadow-[5px_5px_0px_0px_rgba(30,41,59,1)];
   }
   
   .brutal-button-orange {
-    @apply bg-orange-500 text-white font-black px-4 py-2 rounded-xl border-2 border-slate-800 shadow-[2px_2px_0px_0px_rgba(194,65,12,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all md:px-6 md:py-3 md:rounded-2xl md:shadow-[4px_4px_0px_0px_rgba(194,65,12,1)];
+    @apply bg-orange-500 text-white font-black px-4 py-2 rounded-xl border-2 border-slate-800 shadow-[2px_2px_0px_0px_rgba(194,65,12,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all md:px-5 md:py-3 md:rounded-2xl md:shadow-[3px_3px_0px_0px_rgba(194,65,12,1)];
   }
 
   .brutal-button-lime {
-    @apply bg-lime-400 text-slate-900 font-black px-4 py-2 rounded-xl border-2 border-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all md:px-6 md:py-3 md:rounded-2xl md:shadow-[4px_4px_0px_0px_rgba(30,41,59,1)];
+    @apply bg-lime-400 text-slate-900 font-black px-4 py-2 rounded-xl border-2 border-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all md:px-5 md:py-3 md:rounded-2xl md:shadow-[3px_3px_0px_0px_rgba(30,41,59,1)];
   }
 
   .brutal-input {
-    @apply bg-white border-2 border-slate-800 rounded-xl px-3 py-2 outline-none focus:ring-2 ring-lime-400 text-slate-800 font-bold placeholder-slate-300 md:border-4 md:rounded-2xl md:px-4 md:py-3;
+    @apply bg-white border-2 border-slate-800 rounded-xl px-3 py-2 outline-none focus:ring-2 ring-lime-400 text-slate-800 font-bold placeholder-slate-300 md:rounded-2xl md:px-4 md:py-3;
+  }
+
+  .status-pill {
+    @apply inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em];
   }
 }
 
@@ -36,4 +41,254 @@ body {
   }
 }
 
+@keyframes score-confetti-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -32px, 0) rotate(0deg) scale(0.75);
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--drift, 0), 112vh, 0) rotate(var(--spin, 360deg)) scale(1.05);
+  }
+}
 
+@keyframes score-card-pop {
+  0% {
+    transform: translateY(18px) scale(0.82) rotate(-2deg);
+  }
+  55% {
+    transform: translateY(-4px) scale(1.03) rotate(1deg);
+  }
+  100% {
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes score-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(132, 204, 22, 0.3);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 6px rgba(132, 204, 22, 0);
+  }
+}
+
+@keyframes score-bounce {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  30% {
+    transform: translateY(-4px) rotate(-1deg);
+  }
+  60% {
+    transform: translateY(1px) rotate(1deg);
+  }
+}
+
+@keyframes winner-pop {
+  0% {
+    transform: scale(0.97);
+  }
+  45% {
+    transform: scale(1.03);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes score-flight {
+  0%, 100% {
+    opacity: 0.75;
+    transform: translateX(0) rotate(-2deg);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(-10px) rotate(2deg);
+  }
+}
+
+@keyframes score-glow {
+  0%, 100% {
+    opacity: 0.18;
+    transform: translateX(-8%) rotate(0deg);
+  }
+  50% {
+    opacity: 0.34;
+    transform: translateX(8%) rotate(2deg);
+  }
+}
+
+@keyframes champion-dance {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  20% {
+    transform: translateY(-1px) rotate(-1deg);
+  }
+  40% {
+    transform: translateY(1px) rotate(1deg);
+  }
+  60% {
+    transform: translateY(-2px) rotate(0.8deg);
+  }
+  80% {
+    transform: translateY(1px) rotate(-0.8deg);
+  }
+}
+
+@keyframes champion-shine {
+  0%, 100% {
+    box-shadow: inset 0 0 0 rgba(251, 191, 36, 0), 0 0 0 rgba(251, 191, 36, 0);
+  }
+  50% {
+    box-shadow: inset 0 0 18px rgba(251, 191, 36, 0.24), 0 0 18px rgba(132, 204, 22, 0.24);
+  }
+}
+
+.score-confetti {
+  position: absolute;
+  top: -28px;
+  width: 12px;
+  height: 18px;
+  border: 2px solid rgba(15, 23, 42, 0.8);
+  border-radius: 4px;
+  animation: score-confetti-fall 2.1s ease-in forwards;
+}
+
+.score-confetti-0 {
+  background: #a3e635;
+}
+
+.score-confetti-1 {
+  background: #fb923c;
+}
+
+.score-confetti-2 {
+  background: #38bdf8;
+}
+
+.score-confetti-3 {
+  background: #facc15;
+}
+
+.score-confetti-4 {
+  background: #f472b6;
+}
+
+.score-celebration-card {
+  animation: score-card-pop 0.55s ease-out;
+  border: 4px solid #0f172a;
+  border-radius: 28px;
+  padding: 20px;
+  box-shadow: 7px 7px 0 rgba(15, 23, 42, 0.9);
+}
+
+.score-celebration-lime {
+  background: linear-gradient(135deg, #bef264 0%, #fef08a 52%, #ffffff 100%);
+}
+
+.score-celebration-orange {
+  background: linear-gradient(135deg, #fdba74 0%, #fde68a 52%, #ffffff 100%);
+}
+
+.match-card-completed {
+  animation: winner-pop 0.48s ease-out;
+}
+
+.score-win-glow {
+  pointer-events: none;
+  position: absolute;
+  inset: -35%;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 22% 18%, rgba(163, 230, 53, 0.34), transparent 30%),
+    radial-gradient(circle at 78% 28%, rgba(251, 146, 60, 0.22), transparent 34%),
+    radial-gradient(circle at 50% 90%, rgba(56, 189, 248, 0.18), transparent 32%);
+  animation: score-glow 3.4s ease-in-out infinite;
+}
+
+.score-flight-chip {
+  border: 2px solid #0f172a;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  box-shadow: 2px 2px 0 rgba(15, 23, 42, 0.9);
+  animation: score-flight 2.6s ease-in-out infinite;
+}
+
+.score-flight-chip-lime {
+  background: #bef264;
+  color: #0f172a;
+}
+
+.score-flight-chip-orange {
+  animation-delay: 0.28s;
+  background: #fdba74;
+  color: #0f172a;
+}
+
+.score-pulse-pill {
+  animation: score-pulse 1.8s ease-in-out infinite;
+}
+
+.winner-name-pop {
+  animation: winner-pop 0.42s ease-out;
+}
+
+.score-result-bounce {
+  animation: score-bounce 1.7s ease-in-out infinite;
+}
+
+.champion-row {
+  animation: champion-shine 2.6s ease-in-out infinite;
+  background-image: linear-gradient(90deg, rgba(217, 249, 157, 0.9), rgba(254, 243, 199, 0.75), rgba(224, 242, 254, 0.7));
+}
+
+.champion-name-dance {
+  animation: champion-dance 1.9s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.champion-medal {
+  animation: score-bounce 1.45s ease-in-out infinite;
+}
+
+.champion-avatar {
+  animation: champion-dance 1.7s ease-in-out infinite;
+  background: #fef3c7;
+}
+
+.champion-tag {
+  animation: score-pulse 2.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .score-confetti,
+  .score-celebration-card,
+  .match-card-completed,
+  .score-win-glow,
+  .score-flight-chip,
+  .score-pulse-pill,
+  .winner-name-pop,
+  .score-result-bounce,
+  .champion-row,
+  .champion-name-dance,
+  .champion-medal,
+  .champion-avatar,
+  .champion-tag {
+    animation: none !important;
+  }
+
+  .score-confetti {
+    display: none;
+  }
+}

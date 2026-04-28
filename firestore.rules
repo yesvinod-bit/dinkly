@@ -73,11 +73,12 @@ service cloud.firestore {
     match /tournaments/{tournamentId} {
       function isValidTournamentDocument(data) {
         return data.keys().hasAll(['name', 'code', 'ownerId', 'status', 'createdAt']) &&
-               data.keys().hasOnly(['name', 'code', 'ownerId', 'format', 'status', 'createdAt', 'updatedAt']) &&
+               data.keys().hasOnly(['name', 'code', 'ownerId', 'format', 'pairingMode', 'status', 'createdAt', 'updatedAt']) &&
                data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
                data.code is string && data.code.matches('^[A-Z0-9]{6}$') &&
                data.ownerId == request.auth.uid &&
                (!data.keys().hasAny(['format']) || data.format in ['singles', 'doubles']) &&
+               (!data.keys().hasAny(['pairingMode']) || data.pairingMode in ['random', 'fixed']) &&
                data.status in ['setup', 'active', 'completed'] &&
                data.createdAt is timestamp &&
                (!data.keys().hasAny(['updatedAt']) || data.updatedAt is timestamp);
@@ -87,6 +88,13 @@ service cloud.firestore {
         return before == after ||
                (before == 'setup' && after == 'active') ||
                (before == 'active' && after == 'completed');
+      }
+
+      function hasSamePairingMode(before, after) {
+        return (!before.keys().hasAny(['pairingMode']) && !after.keys().hasAny(['pairingMode'])) ||
+               (before.keys().hasAny(['pairingMode']) &&
+                after.keys().hasAny(['pairingMode']) &&
+                before.pairingMode == after.pairingMode);
       }
 
       allow get: if true;
@@ -105,8 +113,9 @@ service cloud.firestore {
                     incoming().createdAt == existing().createdAt &&
                     incoming().code == existing().code &&
                     incoming().format == existing().format &&
+                    (existing().status == 'setup' || hasSamePairingMode(existing(), incoming())) &&
                     isValidTournamentStatusTransition(existing().status, incoming().status) &&
-                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'status', 'updatedAt']);
+                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'pairingMode', 'status', 'updatedAt']);
 
       // Players Subcollection
       match /players/{playerId} {
@@ -136,12 +145,14 @@ service cloud.firestore {
 
         function isValidPlayerDocument(data) {
           return data.keys().hasAll(['name', 'points', 'gamesPlayed', 'wins', 'addedAt']) &&
-                 data.keys().hasOnly(['name', 'points', 'gamesPlayed', 'wins', 'addedAt', 'claimedByUserId', 'claimedByEmail', 'claimedAt']) &&
+                 data.keys().hasOnly(['name', 'points', 'gamesPlayed', 'wins', 'addedAt', 'fixedPairId', 'claimedByUserId', 'claimedByEmail', 'claimedAt']) &&
                  data.name is string && data.name.size() > 0 && data.name.size() <= 50 &&
                  data.points is number &&
                  data.gamesPlayed is number && data.gamesPlayed >= 0 &&
                  data.wins is number && data.wins >= 0 && data.wins <= data.gamesPlayed &&
                  data.addedAt is timestamp &&
+                 (!data.keys().hasAny(['fixedPairId']) ||
+                  (data.fixedPairId is string && data.fixedPairId.size() > 0 && data.fixedPairId.size() <= 80)) &&
                  hasValidClaimFields(data);
         }
 
@@ -186,6 +197,18 @@ service cloud.firestore {
                       isValidId(playerId) &&
                       tournamentExists(tournamentId) &&
                       isOwner(tournamentId) &&
+                      tournamentStatus(tournamentId) == 'setup' &&
+                      isValidPlayerDocument(incoming()) &&
+                      existing().name == incoming().name &&
+                      existing().points == incoming().points &&
+                      existing().gamesPlayed == incoming().gamesPlayed &&
+                      existing().wins == incoming().wins &&
+                      existing().addedAt == incoming().addedAt &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['fixedPairId']);
+        allow update: if isValidId(tournamentId) &&
+                      isValidId(playerId) &&
+                      tournamentExists(tournamentId) &&
+                      isOwner(tournamentId) &&
                       tournamentStatus(tournamentId) in ['active', 'completed'];
       }
 
@@ -217,6 +240,26 @@ service cloud.firestore {
 
         function hasPreviousCompletedAtField(data) {
           return data.keys().hasAny(['previousCompletedAt']);
+        }
+
+        function hasStageField(data) {
+          return data.keys().hasAny(['stage']);
+        }
+
+        function hasPlayoffRoundField(data) {
+          return data.keys().hasAny(['playoffRound']);
+        }
+
+        function hasRoundLabelField(data) {
+          return data.keys().hasAny(['roundLabel']);
+        }
+
+        function hasSeed1Field(data) {
+          return data.keys().hasAny(['seed1']);
+        }
+
+        function hasSeed2Field(data) {
+          return data.keys().hasAny(['seed2']);
         }
 
         function isValidTeam(team) {
@@ -257,6 +300,26 @@ service cloud.firestore {
                  data.previousCompletedAt is timestamp;
         }
 
+        function isValidStage(data) {
+          return !hasStageField(data) ||
+                 data.stage in ['preliminary', 'playoff'];
+        }
+
+        function isValidPlayoffRound(data) {
+          return !hasPlayoffRoundField(data) ||
+                 (data.playoffRound is number && data.playoffRound >= 1);
+        }
+
+        function isValidRoundLabel(data) {
+          return !hasRoundLabelField(data) ||
+                 (data.roundLabel is string && data.roundLabel.size() > 0 && data.roundLabel.size() <= 80);
+        }
+
+        function isValidSeeds(data) {
+          return (!hasSeed1Field(data) || (data.seed1 is number && data.seed1 >= 1)) &&
+                 (!hasSeed2Field(data) || (data.seed2 is number && data.seed2 >= 1));
+        }
+
         function isValidScoresForStatus(data) {
           return (data.status == 'pending' &&
                   data.score1 == 0 &&
@@ -289,7 +352,12 @@ service cloud.firestore {
                    'statusBeforeVoid',
                    'previousScore1',
                    'previousScore2',
-                   'previousCompletedAt'
+                   'previousCompletedAt',
+                   'stage',
+                   'playoffRound',
+                   'roundLabel',
+                   'seed1',
+                   'seed2'
                  ]) &&
                  data.round is number && data.round >= 1 &&
                  isValidTeam(data.team1) &&
@@ -302,6 +370,10 @@ service cloud.firestore {
                  isValidPreviousScore1(data) &&
                  isValidPreviousScore2(data) &&
                  isValidPreviousCompletedAt(data) &&
+                 isValidStage(data) &&
+                 isValidPlayoffRound(data) &&
+                 isValidRoundLabel(data) &&
+                 isValidSeeds(data) &&
                  isValidScoresForStatus(data) &&
                  data.updatedAt is timestamp;
         }

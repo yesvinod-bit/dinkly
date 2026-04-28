@@ -15,11 +15,22 @@ import {
   auth, 
   Tournament, 
   TournamentFormat,
+  TournamentPairingMode,
   Player, 
   Match, 
   getReadableFirestoreError
 } from '../lib/firebase';
-import { generateRoundMatches, getMinimumPlayers, getTournamentFormat, getTournamentFormatTag } from '../lib/tournamentLogic';
+import {
+  buildSeededPlayoffMatches,
+  generateRoundMatches,
+  getFixedPairingStatus,
+  getFixedPairStandings,
+  getMinimumPlayers,
+  getTournamentFormat,
+  getTournamentFormatTag,
+  getTournamentPairingMode,
+  type SeededPlayoffPair
+} from '../lib/tournamentLogic';
 import { 
   Trophy, 
   Users, 
@@ -43,6 +54,24 @@ interface Props {
   onBack: () => void;
 }
 
+function TournamentStatusPill({ status, readOnly }: { status?: Tournament['status']; readOnly: boolean }) {
+  const label = readOnly ? 'spectator' : (status || 'setup');
+  const styles = label === 'active'
+    ? 'border-lime-300 bg-lime-100 text-lime-800'
+    : label === 'completed'
+      ? 'border-slate-300 bg-slate-100 text-slate-700'
+      : label === 'spectator'
+        ? 'border-sky-300 bg-sky-100 text-sky-800'
+        : 'border-orange-300 bg-orange-100 text-orange-800';
+
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.14em] ${styles}`}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+      {label}
+    </span>
+  );
+}
+
 export default function TournamentDashboard({ tournamentId, readOnly = false, onBack }: Props) {
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -50,7 +79,9 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   const [tab, setTab] = useState<'matches' | 'leaderboard' | 'setup'>('matches');
   const [loading, setLoading] = useState(true);
   const [roundActionError, setRoundActionError] = useState<string | null>(null);
+  const [playoffActionError, setPlayoffActionError] = useState<string | null>(null);
   const [isGeneratingRound, setIsGeneratingRound] = useState(false);
+  const [isCreatingPlayoffRound, setIsCreatingPlayoffRound] = useState(false);
   const [isTournamentMember, setIsTournamentMember] = useState(false);
 
   useEffect(() => {
@@ -110,8 +141,11 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   const canContributePlayers = !readOnly && (isOwner || isTournamentMember);
   const showSetupTab = !readOnly && (isOwner || isTournamentMember);
   const tournamentFormat: TournamentFormat = getTournamentFormat(tournament?.format);
+  const tournamentPairingMode: TournamentPairingMode = getTournamentPairingMode(tournament?.pairingMode, tournamentFormat);
   const tournamentFormatTag = getTournamentFormatTag(tournamentFormat);
   const minimumPlayers = getMinimumPlayers(tournamentFormat);
+  const fixedPairingStatus = getFixedPairingStatus(players);
+  const playoffStarted = matches.some((match) => match.stage === 'playoff');
   const currentRound = matches.length > 0 ? Math.max(...matches.map((match) => match.round)) : 0;
   const currentRoundMatches = matches.filter((match) => match.round === currentRound && match.status !== 'void');
   const gamesLeftInRound = currentRoundMatches.filter((match) => match.status === 'pending').length;
@@ -122,6 +156,11 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
     setRoundActionError(null);
     if (players.length < minimumPlayers) {
       return alert(`Need at least ${minimumPlayers} players for a ${tournamentFormat} tournament!`);
+    }
+    if (tournamentPairingMode === 'fixed' && fixedPairingStatus.issue) {
+      setRoundActionError(fixedPairingStatus.issue);
+      setTab('setup');
+      return;
     }
     try {
       await updateDoc(doc(db, 'tournaments', tournamentId), { status: 'active' });
@@ -139,14 +178,24 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
     setIsGeneratingRound(true);
 
     try {
+      if (playoffStarted) {
+        setRoundActionError('Playoffs have started. Create knockout rounds from Rankings.');
+        setTab('leaderboard');
+        return;
+      }
       if (players.length < minimumPlayers) {
         setRoundActionError(`You need at least ${minimumPlayers} players for a ${tournamentFormat} round.`);
+        return;
+      }
+      if (tournamentPairingMode === 'fixed' && fixedPairingStatus.issue) {
+        setRoundActionError(fixedPairingStatus.issue);
+        setTab('setup');
         return;
       }
 
       const currentRound = matches.length > 0 ? Math.max(...matches.map(m => m.round)) : 0;
       const nextRound = currentRound + 1;
-      const roundMatches = generateRoundMatches(players, nextRound, tournamentFormat, matches);
+      const roundMatches = generateRoundMatches(players, nextRound, tournamentFormat, matches, tournamentPairingMode);
 
       if (roundMatches.length === 0) {
         setRoundActionError(`No ${tournamentFormat} matches could be generated from the current roster.`);
@@ -174,6 +223,184 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
       setRoundActionError(message);
     } finally {
       setIsGeneratingRound(false);
+    }
+  };
+
+  const setMatchDocs = async (roundMatches: Partial<Match>[]) => {
+    const batch = writeBatch(db);
+    roundMatches.forEach((m) => {
+      const ref = doc(collection(db, 'tournaments', tournamentId, 'matches'));
+      batch.set(ref, {
+        ...m,
+        updatedAt: serverTimestamp(),
+        completedAt: null,
+        voidedAt: null,
+        statusBeforeVoid: null,
+        previousScore1: null,
+        previousScore2: null,
+        previousCompletedAt: null,
+      });
+    });
+    await batch.commit();
+  };
+
+  const getFixedPairForTeam = (team: string[]): SeededPlayoffPair | null => {
+    const teamPairIds = Array.from(new Set(
+      team
+        .map((playerId) => players.find((player) => player.id === playerId)?.fixedPairId)
+        .filter((pairId): pairId is string => Boolean(pairId))
+    ));
+
+    if (teamPairIds.length !== 1) return null;
+
+    const pairPlayers = players.filter((player) => player.fixedPairId === teamPairIds[0]);
+    if (pairPlayers.length !== 2) return null;
+
+    return {
+      id: teamPairIds[0],
+      playerIds: pairPlayers.map((player) => player.id),
+      label: pairPlayers.map((player) => player.name).join(' & '),
+      seed: 0,
+    };
+  };
+
+  const getWinningPlayoffPair = (match: Match): SeededPlayoffPair | null => {
+    if (match.status !== 'completed' || match.score1 === match.score2) return null;
+
+    const winnerTeam = match.score1 > match.score2 ? 1 : 2;
+    const pair = getFixedPairForTeam(winnerTeam === 1 ? match.team1 : match.team2);
+    if (!pair) return null;
+
+    const fallbackSeed = getFixedPairStandings(players, matches, 'preliminary')
+      .find((standing) => standing.id === pair.id)?.seed ?? Number.MAX_SAFE_INTEGER;
+
+    return {
+      ...pair,
+      seed: winnerTeam === 1 ? (match.seed1 ?? fallbackSeed) : (match.seed2 ?? fallbackSeed),
+    };
+  };
+
+  const createInitialPlayoffRound = async (pairIds: string[]) => {
+    if (!canManageTournament) return;
+
+    setPlayoffActionError(null);
+    setRoundActionError(null);
+    setIsCreatingPlayoffRound(true);
+
+    try {
+      if (tournamentFormat !== 'doubles' || tournamentPairingMode !== 'fixed') {
+        setPlayoffActionError('Playoffs are only available for fixed-pair doubles tournaments.');
+        return;
+      }
+      if (tournament?.status !== 'active') {
+        setPlayoffActionError('Start the tournament before creating playoffs.');
+        return;
+      }
+      if (playoffStarted) {
+        setPlayoffActionError('Playoffs have already started for this tournament.');
+        return;
+      }
+      if (pairIds.length < 2) {
+        setPlayoffActionError('Select at least 2 pairs for the playoff.');
+        return;
+      }
+      if (pairIds.length % 2 !== 0) {
+        setPlayoffActionError('Select an even number of pairs before creating playoffs.');
+        return;
+      }
+      const selectedPairIds = new Set(pairIds);
+      const preliminaryStandings = getFixedPairStandings(players, matches, 'preliminary');
+      const seededPairs = preliminaryStandings
+        .filter((standing) => selectedPairIds.has(standing.id))
+        .map((standing) => ({
+          id: standing.id,
+          playerIds: standing.playerIds,
+          label: standing.label,
+          seed: standing.seed,
+        }));
+
+      if (seededPairs.length !== pairIds.length) {
+        setPlayoffActionError('One or more selected pairs are no longer available. Refresh the selection and try again.');
+        return;
+      }
+
+      const nextRound = currentRound + 1;
+      const roundMatches = buildSeededPlayoffMatches(seededPairs, nextRound, 1);
+      if (roundMatches.length === 0) {
+        setPlayoffActionError('No playoff games could be created from the selected pairs.');
+        return;
+      }
+
+      await setMatchDocs(roundMatches);
+      setTab('matches');
+    } catch (e) {
+      console.error('Playoff creation failed:', e);
+      const message = getReadableFirestoreError(e, 'Unable to create the playoff round right now.');
+      setPlayoffActionError(message);
+    } finally {
+      setIsCreatingPlayoffRound(false);
+    }
+  };
+
+  const createNextPlayoffRound = async () => {
+    if (!canManageTournament) return;
+
+    setPlayoffActionError(null);
+    setRoundActionError(null);
+    setIsCreatingPlayoffRound(true);
+
+    try {
+      if (tournamentFormat !== 'doubles' || tournamentPairingMode !== 'fixed') {
+        setPlayoffActionError('Playoffs are only available for fixed-pair doubles tournaments.');
+        return;
+      }
+
+      const playoffMatches = matches.filter((match) => match.stage === 'playoff');
+      if (playoffMatches.length === 0) {
+        setPlayoffActionError('Create the first playoff round before advancing.');
+        return;
+      }
+
+      const currentPlayoffRound = Math.max(...playoffMatches.map((match) => match.playoffRound ?? 1));
+      const currentPlayoffMatches = playoffMatches.filter((match) => (
+        (match.playoffRound ?? 1) === currentPlayoffRound
+      ));
+
+      if (currentPlayoffMatches.some((match) => match.status !== 'completed')) {
+        setPlayoffActionError('Finish all games in the current playoff round first.');
+        return;
+      }
+
+      const winners = currentPlayoffMatches
+        .map(getWinningPlayoffPair)
+        .filter((pair): pair is SeededPlayoffPair => Boolean(pair))
+        .sort((left, right) => left.seed - right.seed);
+
+      if (winners.length < 2) {
+        setPlayoffActionError('Playoff is complete.');
+        return;
+      }
+
+      if (winners.length % 2 !== 0) {
+        setPlayoffActionError('An odd number of playoff winners is available. Resolve the current round before continuing.');
+        return;
+      }
+
+      const nextRound = currentRound + 1;
+      const roundMatches = buildSeededPlayoffMatches(winners, nextRound, currentPlayoffRound + 1);
+      if (roundMatches.length === 0) {
+        setPlayoffActionError('No next playoff games could be created.');
+        return;
+      }
+
+      await setMatchDocs(roundMatches);
+      setTab('matches');
+    } catch (e) {
+      console.error('Next playoff round failed:', e);
+      const message = getReadableFirestoreError(e, 'Unable to create the next playoff round right now.');
+      setPlayoffActionError(message);
+    } finally {
+      setIsCreatingPlayoffRound(false);
     }
   };
 
@@ -225,9 +452,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                    <span className="text-[8px] font-bold text-lime-600 uppercase mr-1">CODE:</span>
                    <span className="text-xs font-mono font-black text-slate-800">{tournament?.code}</span>
                 </div>
-                <span className="text-[8px] font-bold uppercase text-lime-700 bg-lime-100 px-1.5 py-0.5 rounded-md border border-lime-200">
-                  {tournament?.status}
-                </span>
+                <TournamentStatusPill status={tournament?.status} readOnly={readOnly} />
                 <span className="inline-flex items-center gap-1 rounded-md border border-orange-300 bg-orange-100 px-2 py-0.5 text-[8px] font-black uppercase text-orange-700">
                   <span>{tournamentFormatTag.label}</span>
                   <span className="text-orange-500">•</span>
@@ -263,6 +488,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                 tournamentId={tournamentId} 
                 players={players} 
                 format={tournamentFormat}
+                pairingMode={tournamentPairingMode}
                 canAddPlayers={canContributePlayers}
                 isOwner={canManageTournament}
                 status={tournament?.status || 'setup'}
@@ -287,7 +513,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                       </span>
                     </button>
                   )}
-                  {canManageTournament && tournament?.status === 'active' && (
+                  {canManageTournament && tournament?.status === 'active' && !playoffStarted && (
                     <button 
                       onClick={generateNextRound}
                       disabled={isGeneratingRound}
@@ -321,7 +547,17 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
 
           {tab === 'leaderboard' && (
             <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
-              <Leaderboard players={players} matches={matches} />
+              <Leaderboard
+                players={players}
+                matches={matches}
+                format={tournamentFormat}
+                pairingMode={tournamentPairingMode}
+                canManageTournament={canManageTournament}
+                isCreatingPlayoffRound={isCreatingPlayoffRound}
+                playoffActionError={playoffActionError}
+                onCreatePlayoffRound={createInitialPlayoffRound}
+                onCreateNextPlayoffRound={createNextPlayoffRound}
+              />
             </motion.div>
           )}
         </AnimatePresence>

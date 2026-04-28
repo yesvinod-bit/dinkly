@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   doc, 
   collection,
@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db, Player, Match, TournamentFormat, getReadableFirestoreError, handleFirestoreError } from '../lib/firebase';
 import { getTournamentFormat } from '../lib/tournamentLogic';
-import { CheckCircle2, ChevronRight, User, Swords, Share2, RotateCcw, Clock3, Pencil } from 'lucide-react';
+import { CheckCircle2, ChevronRight, User, Swords, Share2, RotateCcw, Clock3, Pencil, PartyPopper, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface Props {
@@ -23,6 +23,83 @@ interface Props {
   readOnly?: boolean;
 }
 
+interface ScoreCelebration {
+  id: number;
+  winnerLabel: string;
+  scoreLine: string;
+  margin: number;
+  tone: 'lime' | 'orange';
+}
+
+const celebrationCopy = [
+  'Score locked. Bragging rights pending.',
+  'Result saved. Group chat ammunition loaded.',
+  'The scoreboard has spoken, loudly.',
+  'That one is officially in the receipts.',
+  'Court drama archived successfully.',
+  'Winner recorded. Ego management begins now.',
+];
+
+const confettiPieces = Array.from({ length: 34 }, (_, index) => ({
+  id: index,
+  left: `${(index * 29) % 100}%`,
+  delay: `${(index % 9) * 0.06}s`,
+  duration: `${1.8 + (index % 6) * 0.16}s`,
+  drift: `${((index % 7) - 3) * 18}px`,
+  rotate: `${(index * 47) % 360}deg`,
+}));
+
+function ScoreCelebrationOverlay({ celebration }: { celebration: ScoreCelebration }) {
+  const message = celebrationCopy[celebration.id % celebrationCopy.length];
+
+  return (
+    <div className="pointer-events-none fixed inset-0 z-[250] overflow-hidden">
+      {confettiPieces.map((piece) => (
+        <span
+          key={`${celebration.id}-${piece.id}`}
+          className={`score-confetti score-confetti-${piece.id % 5}`}
+          style={{
+            left: piece.left,
+            animationDelay: piece.delay,
+            animationDuration: piece.duration,
+            ['--drift' as string]: piece.drift,
+            ['--spin' as string]: piece.rotate,
+          }}
+        />
+      ))}
+      <div className="absolute inset-x-4 top-[18%] mx-auto max-w-sm">
+        <motion.div
+          key={celebration.id}
+          initial={{ opacity: 0, scale: 0.72, y: 24, rotate: -2 }}
+          animate={{ opacity: 1, scale: 1, y: 0, rotate: 0 }}
+          exit={{ opacity: 0, scale: 0.9, y: -10 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 22 }}
+          className={`score-celebration-card ${
+            celebration.tone === 'lime' ? 'score-celebration-lime' : 'score-celebration-orange'
+          }`}
+        >
+          <div className="flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-700">
+            <PartyPopper className="h-4 w-4" />
+            Score Saved
+          </div>
+          <div className="mt-3 text-center text-2xl font-black uppercase leading-tight text-slate-950">
+            {celebration.winnerLabel}
+          </div>
+          <div className="mt-2 text-center font-mono text-4xl font-black text-slate-950">
+            {celebration.scoreLine}
+          </div>
+          <div className="mt-3 text-center text-xs font-black uppercase tracking-[0.14em] text-slate-700">
+            Won by {celebration.margin} {celebration.margin === 1 ? 'point' : 'points'}
+          </div>
+          <div className="mt-3 rounded-2xl border-2 border-slate-800 bg-white/70 px-3 py-2 text-center text-[11px] font-black uppercase text-slate-800">
+            {message}
+          </div>
+        </motion.div>
+      </div>
+    </div>
+  );
+}
+
 export default function MatchList({ tournamentId, tournamentName, format, matches, players, isOwner, readOnly = false }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [score1, setScore1] = useState<string>('');
@@ -30,11 +107,22 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyMatchId, setBusyMatchId] = useState<string | null>(null);
   const [roundTab, setRoundTab] = useState<'active' | 'voided'>('active');
+  const [showOlderRounds, setShowOlderRounds] = useState(false);
+  const [celebration, setCelebration] = useState<ScoreCelebration | null>(null);
   const tournamentFormat = getTournamentFormat(format);
   const canEditScores = isOwner && !readOnly;
+  const playoffStarted = matches.some((match) => match.stage === 'playoff');
 
   const getPlayerName = (id: string) => players.find(p => p.id === id)?.name || 'Unknown';
   const competitorLabel = tournamentFormat === 'singles' ? 'Player' : 'Team';
+  const isFrozenPreliminaryMatch = (match: Match) => playoffStarted && match.stage !== 'playoff';
+
+  useEffect(() => {
+    if (!celebration) return;
+
+    const timeoutId = window.setTimeout(() => setCelebration(null), 2600);
+    return () => window.clearTimeout(timeoutId);
+  }, [celebration]);
 
   const resetEditor = () => {
     setEditingId(null);
@@ -43,6 +131,11 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
   };
 
   const startEditingMatch = (match: Match) => {
+    if (isFrozenPreliminaryMatch(match)) {
+      setActionError('Preliminary games are frozen after playoffs begin.');
+      return;
+    }
+
     setEditingId(match.id);
     setScore1(match.status === 'completed' ? String(match.score1) : '');
     setScore2(match.status === 'completed' ? String(match.score2) : '');
@@ -134,6 +227,10 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
     setBusyMatchId(match.id);
 
     try {
+      if (playoffStarted) {
+        setActionError('Use Rankings to create playoff rounds after playoffs begin.');
+        return;
+      }
       if (match.status === 'pending') {
         setActionError('Finish or void this game before repeating it.');
         return;
@@ -173,6 +270,10 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
 
   const voidMatch = async (match: Match) => {
     if (!canEditScores) return;
+    if (isFrozenPreliminaryMatch(match)) {
+      setActionError('Preliminary games are frozen after playoffs begin.');
+      return;
+    }
     if (!window.confirm(`Void this game in round ${match.round}? Completed scores for this game will be removed from the standings.`)) return;
     setActionError(null);
     setBusyMatchId(match.id);
@@ -212,6 +313,10 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
 
   const unvoidMatch = async (match: Match) => {
     if (!canEditScores) return;
+    if (isFrozenPreliminaryMatch(match)) {
+      setActionError('Preliminary games are frozen after playoffs begin.');
+      return;
+    }
     if (!window.confirm(`Restore this game in round ${match.round}? Any completed score for this game will be added back to the standings.`)) return;
     setActionError(null);
     setBusyMatchId(match.id);
@@ -262,6 +367,10 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
 
   const submitScore = async (match: Match) => {
     if (!canEditScores) return;
+    if (isFrozenPreliminaryMatch(match)) {
+      setActionError('Preliminary games are frozen after playoffs begin.');
+      return;
+    }
     const s1 = parseInt(score1, 10);
     const s2 = parseInt(score2, 10);
     setActionError(null);
@@ -305,6 +414,15 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
       }, 1);
 
       await batch.commit();
+      const winnerTeam = s1 > s2 ? 1 : 2;
+      const winnerIds = winnerTeam === 1 ? match.team1 : match.team2;
+      setCelebration({
+        id: Date.now(),
+        winnerLabel: winnerIds.map(getPlayerName).join(' & '),
+        scoreLine: `${s1}-${s2}`,
+        margin: Math.abs(s1 - s2),
+        tone: winnerTeam === 1 ? 'lime' : 'orange',
+      });
       resetEditor();
     } catch (e) {
       try {
@@ -317,6 +435,10 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
 
   const undoScore = async (match: Match) => {
     if (!canEditScores) return;
+    if (isFrozenPreliminaryMatch(match)) {
+      setActionError('Preliminary games are frozen after playoffs begin.');
+      return;
+    }
     if (!window.confirm('Are you sure you want to undo this score? This will revert player stats.')) return;
     setActionError(null);
 
@@ -370,15 +492,19 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
   };
 
   const rounds = Array.from(new Set(matches.map(m => m.round))).sort((a, b) => b - a);
+  const currentRound = rounds[0] ?? 0;
   const visibleRounds = rounds.filter((round) => {
     const roundMatches = matches.filter((match) => match.round === round);
-    return roundTab === 'active'
+    const matchesTab = roundTab === 'active'
       ? roundMatches.some((match) => match.status !== 'void')
       : roundMatches.some((match) => match.status === 'void');
+    return matchesTab && (showOlderRounds || roundTab === 'voided' || round === currentRound);
   });
+  const hiddenOlderRoundCount = rounds.filter((round) => roundTab === 'active' && round !== currentRound).length;
 
   return (
     <div className="space-y-8 sm:space-y-12">
+      {celebration && <ScoreCelebrationOverlay celebration={celebration} />}
       {actionError && (
         <div className="rounded-2xl border-2 border-orange-200 bg-orange-50 px-4 py-3 text-sm font-bold text-orange-700">
           {actionError}
@@ -404,21 +530,51 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
           </button>
         </div>
       )}
+      {roundTab === 'active' && hiddenOlderRoundCount > 0 && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setShowOlderRounds((prev) => !prev)}
+            className="rounded-xl border-2 border-slate-800 bg-white px-4 py-2 text-[10px] font-black uppercase text-slate-700 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
+          >
+            {showOlderRounds ? 'Hide older rounds' : `Show older rounds (${hiddenOlderRoundCount})`}
+          </button>
+        </div>
+      )}
       {visibleRounds.map(round => (
         <div key={round}>
           {(() => {
-            const roundMatches = matches.filter((match) => (
-              match.round === round && (roundTab === 'active' ? match.status !== 'void' : match.status === 'void')
-            ));
+            const roundMatches = matches
+              .filter((match) => (
+                match.round === round && (roundTab === 'active' ? match.status !== 'void' : match.status === 'void')
+              ))
+              .sort((a, b) => {
+                if (a.status === b.status) return a.id.localeCompare(b.id);
+                if (a.status === 'pending') return -1;
+                if (b.status === 'pending') return 1;
+                return a.status.localeCompare(b.status);
+              });
             const activePlayerIds = new Set(roundMatches.flatMap((match) => [...match.team1, ...match.team2]));
             const benchedPlayers = roundTab === 'active'
               ? players.filter((player) => !activePlayerIds.has(player.id))
               : [];
+            const roundLabel = roundMatches.find((match) => match.roundLabel)?.roundLabel || `RD ${round}`;
+            const isPlayoffRound = roundMatches.some((match) => match.stage === 'playoff');
 
             return (
               <>
           <div className="mb-4 flex items-center gap-4 sm:mb-6">
-            <span className="bg-zinc-900 text-white px-3 py-1 rounded-full text-xs font-bold font-mono">RD {round}</span>
+            <span className="bg-zinc-900 text-white px-3 py-1 rounded-full text-xs font-bold font-mono uppercase">{roundLabel}</span>
+            {roundLabel !== `RD ${round}` && (
+              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                RD {round}
+              </span>
+            )}
+            {isPlayoffRound && (
+              <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-orange-700">
+                Playoff
+              </span>
+            )}
             <div className="h-px bg-zinc-100 flex-1" />
             {roundTab === 'voided' && (
               <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-orange-700">
@@ -453,6 +609,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
               (() => {
                 const winnerTeam = getWinnerTeam(match);
                 const isEditingThisMatch = editingId === match.id;
+                const canEditThisMatch = canEditScores && !isFrozenPreliminaryMatch(match);
                 const inlineValidation = isEditingThisMatch && score1 !== '' && score2 !== ''
                   ? getScoreValidationMessage(parseInt(score1, 10), parseInt(score2, 10))
                   : null;
@@ -461,13 +618,29 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
               <motion.div 
                 key={match.id}
                 layout
-                className={`brutal-card p-3 sm:p-6 transition-all ${
-                  match.status === 'completed' ? 'opacity-80' : ''
+                className={`brutal-card relative overflow-hidden p-3 sm:p-6 transition-all ${
+                  match.status === 'completed' ? 'match-card-completed' : ''
                 }`}
               >
+                {match.status === 'completed' && (
+                  <>
+                    <div className="score-win-glow" />
+                    <div className="pointer-events-none absolute right-3 top-12 z-0 hidden flex-col gap-2 sm:flex">
+                      <span className="score-flight-chip score-flight-chip-lime">Winner</span>
+                      <span className="score-flight-chip score-flight-chip-orange">+{Math.abs(match.score1 - match.score2)}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex items-center justify-between mb-3 sm:mb-6">
-                   <div className="flex items-center gap-1.5 text-slate-400 font-mono text-[9px] sm:text-xs uppercase font-black">
-                     <Swords className="w-2.5 h-2.5" /> GAME {match.id.slice(-4).toUpperCase()}
+                   <div className="flex flex-wrap items-center gap-1.5 text-slate-400 font-mono text-[9px] sm:text-xs uppercase font-black">
+                     <span className="inline-flex items-center gap-1.5">
+                       <Swords className="w-2.5 h-2.5" /> GAME {match.id.slice(-4).toUpperCase()}
+                     </span>
+                     {match.stage === 'playoff' && match.seed1 && match.seed2 && (
+                       <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 font-sans text-[8px] font-black tracking-[0.14em] text-orange-700">
+                         Seed {match.seed1} vs {match.seed2}
+                       </span>
+                     )}
                    </div>
                    {match.status === 'void' && (
                      <div className="flex items-center gap-2 sm:gap-3">
@@ -479,7 +652,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                    )}
                    {match.status === 'completed' && (
                      <div className="flex items-center gap-2 sm:gap-3">
-                       <span className="flex items-center gap-1 text-lime-600 text-[9px] sm:text-xs font-black uppercase tracking-wider bg-lime-50 px-1.5 py-0.5 rounded border border-lime-200">
+                       <span className="score-pulse-pill flex items-center gap-1 text-lime-600 text-[9px] sm:text-xs font-black uppercase tracking-wider bg-lime-50 px-1.5 py-0.5 rounded border border-lime-200">
                          <CheckCircle2 className="w-3 h-3" /> <span className="hidden xs:inline">Completed</span>
                        </span>
                        <button 
@@ -489,7 +662,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                         >
                           <Share2 className="w-2.5 sm:w-3.5 h-2.5 sm:h-3.5" />
                         </button>
-                       {canEditScores && (
+                       {canEditThisMatch && (
                          <button 
                            onClick={() => startEditingMatch(match)}
                            className="p-1 sm:p-1.5 bg-white border border-slate-800 rounded-lg text-slate-800 hover:bg-sky-50 transition-colors shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]"
@@ -498,7 +671,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                            <Pencil className="w-2.5 sm:w-3.5 h-2.5 sm:h-3.5" />
                          </button>
                        )}
-                       {canEditScores && (
+                       {canEditThisMatch && (
                          <button 
                            onClick={() => undoScore(match)}
                            className="p-1 sm:p-1.5 bg-white border border-slate-800 rounded-lg text-orange-500 hover:bg-orange-50 transition-colors shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]"
@@ -515,13 +688,14 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                   <div className="col-span-2 space-y-1 sm:space-y-2">
                     {match.team1.map(pid => (
                       <div key={pid} className={`flex items-center gap-1.5 rounded-xl px-1.5 py-1 text-[11px] sm:text-lg font-black truncate transition-colors ${
-                        winnerTeam === 1 ? 'bg-lime-100 text-lime-900 ring-2 ring-lime-300' : 'text-slate-800'
+                        winnerTeam === 1 ? 'winner-name-pop bg-lime-100 text-lime-900 ring-2 ring-lime-300' : 'text-slate-800'
                       }`}>
                         <div className={`w-4 h-4 sm:w-8 sm:h-8 rounded-md sm:rounded-lg border border-slate-800 flex items-center justify-center text-slate-800 shrink-0 ${
                           winnerTeam === 1 ? 'bg-lime-300' : 'bg-lime-100'
                         }`}>
                           <User className="w-2.5 h-2.5 sm:w-4 sm:h-4" />
                         </div>
+                        {winnerTeam === 1 && <Sparkles className="h-3 w-3 shrink-0 text-lime-600" />}
                         <span className="truncate">{getPlayerName(pid)}</span>
                       </div>
                     ))}
@@ -536,9 +710,10 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                   <div className="col-span-2 space-y-1 sm:space-y-2 text-right">
                     {match.team2.map(pid => (
                       <div key={pid} className={`flex items-center justify-end gap-1.5 rounded-xl px-1.5 py-1 text-[11px] sm:text-lg font-black truncate transition-colors ${
-                        winnerTeam === 2 ? 'bg-orange-100 text-orange-900 ring-2 ring-orange-300' : 'text-slate-800'
+                        winnerTeam === 2 ? 'winner-name-pop bg-orange-100 text-orange-900 ring-2 ring-orange-300' : 'text-slate-800'
                       }`}>
                         <span className="truncate">{getPlayerName(pid)}</span>
+                        {winnerTeam === 2 && <Sparkles className="h-3 w-3 shrink-0 text-orange-600" />}
                         <div className={`w-4 h-4 sm:w-8 sm:h-8 rounded-md sm:rounded-lg border border-slate-800 flex items-center justify-center text-slate-800 shrink-0 ${
                           winnerTeam === 2 ? 'bg-orange-300' : 'bg-orange-100'
                         }`}>
@@ -550,7 +725,9 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                 </div>
 
                 <div className="mt-4 flex justify-center">
-                   <div className="bg-slate-800 rounded-xl px-4 py-1.5 border-2 border-white shadow-[3px_3px_0px_0px_rgba(163,230,53,1)]">
+                   <div className={`bg-slate-800 rounded-xl px-4 py-1.5 border-2 border-white shadow-[3px_3px_0px_0px_rgba(163,230,53,1)] ${
+                     match.status === 'completed' ? 'score-result-bounce' : ''
+                   }`}>
                       <div className="font-mono text-xl sm:text-2xl font-black tracking-tighter flex items-center text-white">
                         <span className={match.score1 > match.score2 ? 'text-lime-400' : 'text-white'}>
                           {match.score1}
@@ -580,9 +757,9 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                   </div>
                 )}
 
-                {canEditScores && (
+                {canEditThisMatch && (
                   <div className="mt-4 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-center">
-                    {match.status !== 'pending' && (
+                    {match.status !== 'pending' && !playoffStarted && (
                       <button
                         onClick={() => repeatMatch(match)}
                         disabled={busyMatchId === match.id}
@@ -611,7 +788,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                   </div>
                 )}
 
-                {canEditScores && match.status !== 'void' && (
+                {canEditThisMatch && match.status !== 'void' && (
                   <div className="mt-6 pt-4 border-t-2 border-dashed border-slate-200">
                     {isEditingThisMatch ? (
                       <div className="flex flex-col gap-4">
@@ -696,11 +873,14 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
         </div>
       ))}
       {matches.length === 0 && (
-        <div className="p-24 text-center">
-          <div className="w-16 h-16 bg-zinc-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
-            <Swords className="w-8 h-8 text-zinc-300" />
+        <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white p-10 text-center">
+          <div className="w-16 h-16 bg-lime-50 rounded-2xl flex items-center justify-center mx-auto mb-6 border-2 border-lime-100">
+            <Swords className="w-8 h-8 text-lime-400" />
           </div>
-          <p className="text-zinc-400 font-medium">No matches scheduled yet</p>
+          <p className="font-black uppercase text-slate-800">No games scheduled yet</p>
+          <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+            Add players in Participants, then kick off the tournament.
+          </p>
         </div>
       )}
       {matches.length > 0 && visibleRounds.length === 0 && (

@@ -28,6 +28,8 @@ export const signIn = () => signInWithPopup(auth, googleProvider);
 export const logout = () => auth.signOut();
 
 export type TournamentFormat = 'doubles' | 'singles';
+export type TournamentPairingMode = 'random' | 'fixed';
+export type TournamentStage = 'preliminary' | 'playoff';
 
 export interface Tournament {
   id: string;
@@ -35,6 +37,7 @@ export interface Tournament {
   code: string;
   ownerId: string;
   format?: TournamentFormat;
+  pairingMode?: TournamentPairingMode;
   status: 'setup' | 'active' | 'completed';
   createdAt: Timestamp;
   updatedAt?: Timestamp;
@@ -47,6 +50,7 @@ export interface Player {
   gamesPlayed: number;
   wins: number;
   addedAt: Timestamp;
+  fixedPairId?: string;
   claimedByUserId?: string;
   claimedByEmail?: string;
   claimedAt?: Timestamp;
@@ -60,6 +64,11 @@ export interface Match {
   score1: number;
   score2: number;
   status: 'pending' | 'completed' | 'void';
+  stage?: TournamentStage;
+  playoffRound?: number;
+  roundLabel?: string;
+  seed1?: number;
+  seed2?: number;
   updatedAt: Timestamp;
   completedAt?: Timestamp | null;
   voidedAt?: Timestamp | null;

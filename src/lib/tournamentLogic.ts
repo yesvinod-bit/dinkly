@@ -1,9 +1,19 @@
-import type { Match, Player, TournamentFormat } from './firebase.ts';
+import type { Match, Player, TournamentFormat, TournamentPairingMode, TournamentStage } from './firebase.ts';
 
 export const DEFAULT_TOURNAMENT_FORMAT: TournamentFormat = 'doubles';
+export const DEFAULT_TOURNAMENT_PAIRING_MODE: TournamentPairingMode = 'random';
 
 export function getTournamentFormat(format?: TournamentFormat | null): TournamentFormat {
   return format === 'singles' ? 'singles' : DEFAULT_TOURNAMENT_FORMAT;
+}
+
+export function getTournamentPairingMode(
+  pairingMode?: TournamentPairingMode | null,
+  format?: TournamentFormat | null
+): TournamentPairingMode {
+  return getTournamentFormat(format) === 'doubles' && pairingMode === 'fixed'
+    ? 'fixed'
+    : DEFAULT_TOURNAMENT_PAIRING_MODE;
 }
 
 export function getTournamentFormatTag(format?: TournamentFormat | null): { label: string; detail: string } {
@@ -14,6 +24,241 @@ export function getTournamentFormatTag(format?: TournamentFormat | null): { labe
 
 export function getMinimumPlayers(format?: TournamentFormat | null): number {
   return getTournamentFormat(format) === 'singles' ? 2 : 4;
+}
+
+export interface FixedPair {
+  id: string;
+  playerIds: string[];
+  label: string;
+}
+
+export interface FixedPairStanding extends FixedPair {
+  seed: number;
+  points: number;
+  gamesPlayed: number;
+  wins: number;
+  pointsFor: number;
+  pointsAgainst: number;
+  pointDiff: number;
+  averageDiff: number;
+  headToHead: Map<string, number>;
+}
+
+export interface SeededPlayoffPair extends FixedPair {
+  seed: number;
+}
+
+export interface FixedPairingStatus {
+  pairs: FixedPair[];
+  unpairedPlayers: Player[];
+  invalidPairs: FixedPair[];
+  isReady: boolean;
+  issue: string | null;
+}
+
+export function getFixedPairingStatus(players: Player[]): FixedPairingStatus {
+  const playersByPairId = new Map<string, Player[]>();
+  const unpairedPlayers: Player[] = [];
+
+  players.forEach((player) => {
+    const pairId = player.fixedPairId?.trim();
+    if (!pairId) {
+      unpairedPlayers.push(player);
+      return;
+    }
+
+    const pairPlayers = playersByPairId.get(pairId) || [];
+    pairPlayers.push(player);
+    playersByPairId.set(pairId, pairPlayers);
+  });
+
+  const allPairs = Array.from(playersByPairId.entries()).map(([id, pairPlayers]) => ({
+    id,
+    playerIds: pairPlayers.map((player) => player.id),
+    label: pairPlayers.map((player) => player.name).join(' & '),
+  }));
+  const pairs = allPairs.filter((pair) => pair.playerIds.length === 2);
+  const invalidPairs = allPairs.filter((pair) => pair.playerIds.length !== 2);
+
+  let issue: string | null = null;
+  if (players.length < getMinimumPlayers('doubles')) {
+    issue = 'Fixed pair mode needs at least 4 players.';
+  } else if (players.length % 2 !== 0) {
+    issue = 'Fixed pair mode needs an even number of players.';
+  } else if (unpairedPlayers.length > 0) {
+    issue = `${unpairedPlayers.length} player${unpairedPlayers.length === 1 ? '' : 's'} still need a fixed partner.`;
+  } else if (invalidPairs.length > 0) {
+    issue = 'Every fixed pair must have exactly 2 players.';
+  }
+
+  return {
+    pairs,
+    unpairedPlayers,
+    invalidPairs,
+    isReady: issue === null,
+    issue,
+  };
+}
+
+export function getFixedPairs(players: Player[]): FixedPair[] {
+  return Array.from(players.reduce((map, player) => {
+    if (!player.fixedPairId) return map;
+    const pairPlayers = map.get(player.fixedPairId) || [];
+    pairPlayers.push(player);
+    map.set(player.fixedPairId, pairPlayers);
+    return map;
+  }, new Map<string, Player[]>()).entries())
+    .filter(([, pairPlayers]) => pairPlayers.length === 2)
+    .map(([pairId, pairPlayers]) => ({
+      id: pairId,
+      playerIds: pairPlayers.map((player) => player.id),
+      label: pairPlayers.map((player) => player.name).join(' & '),
+    }));
+}
+
+function getMatchStage(match: Match): TournamentStage {
+  return match.stage === 'playoff' ? 'playoff' : 'preliminary';
+}
+
+export function getFixedPairStandings(
+  players: Player[],
+  matches: Match[],
+  stage: TournamentStage = 'preliminary'
+): FixedPairStanding[] {
+  const fixedPairs = getFixedPairs(players);
+  const fixedPairByPlayerId = new Map<string, string>();
+  fixedPairs.forEach((pair) => {
+    pair.playerIds.forEach((playerId) => {
+      fixedPairByPlayerId.set(playerId, pair.id);
+    });
+  });
+
+  const rankedRows: FixedPairStanding[] = fixedPairs.map((pair) => ({
+    ...pair,
+    seed: 0,
+    points: 0,
+    gamesPlayed: 0,
+    wins: 0,
+    pointsFor: 0,
+    pointsAgainst: 0,
+    pointDiff: 0,
+    averageDiff: 0,
+    headToHead: new Map<string, number>(),
+  }));
+  const standingMap = new Map(rankedRows.map((standing) => [standing.id, standing]));
+
+  const getPairIdsForTeam = (team: string[]) => {
+    const pairIds = Array.from(new Set(
+      team
+        .map((playerId) => fixedPairByPlayerId.get(playerId))
+        .filter((pairId): pairId is string => Boolean(pairId))
+    ));
+    return pairIds.length === 1 ? pairIds : [];
+  };
+
+  matches
+    .filter((match) => match.status === 'completed' && getMatchStage(match) === stage)
+    .forEach((match) => {
+      const team1Won = match.score1 > match.score2;
+      const team1StandingIds = getPairIdsForTeam(match.team1);
+      const team2StandingIds = getPairIdsForTeam(match.team2);
+
+      team1StandingIds.forEach((standingId) => {
+        const standing = standingMap.get(standingId);
+        if (!standing) return;
+        standing.gamesPlayed += 1;
+        if (team1Won) standing.wins += 1;
+        standing.pointsFor += match.score1;
+        standing.pointsAgainst += match.score2;
+      });
+
+      team2StandingIds.forEach((standingId) => {
+        const standing = standingMap.get(standingId);
+        if (!standing) return;
+        standing.gamesPlayed += 1;
+        if (!team1Won) standing.wins += 1;
+        standing.pointsFor += match.score2;
+        standing.pointsAgainst += match.score1;
+      });
+
+      team1StandingIds.forEach((team1StandingId) => {
+        team2StandingIds.forEach((team2StandingId) => {
+          const team1Standing = standingMap.get(team1StandingId);
+          const team2Standing = standingMap.get(team2StandingId);
+          if (!team1Standing || !team2Standing) return;
+
+          const margin = match.score1 - match.score2;
+          team1Standing.headToHead.set(
+            team2StandingId,
+            (team1Standing.headToHead.get(team2StandingId) || 0) + margin
+          );
+          team2Standing.headToHead.set(
+            team1StandingId,
+            (team2Standing.headToHead.get(team1StandingId) || 0) - margin
+          );
+        });
+      });
+    });
+
+  rankedRows.forEach((standing) => {
+    standing.pointDiff = standing.pointsFor - standing.pointsAgainst;
+    standing.points = standing.pointDiff;
+    standing.averageDiff = standing.gamesPlayed > 0 ? standing.pointDiff / standing.gamesPlayed : 0;
+  });
+
+  return [...rankedRows].sort((a, b) => {
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    if (b.pointDiff !== a.pointDiff) return b.pointDiff - a.pointDiff;
+
+    const headToHeadMargin = b.headToHead.get(a.id) || 0;
+    if (headToHeadMargin !== 0) return headToHeadMargin;
+
+    if (b.averageDiff !== a.averageDiff) return b.averageDiff - a.averageDiff;
+    if (b.pointsFor !== a.pointsFor) return b.pointsFor - a.pointsFor;
+
+    return a.label.localeCompare(b.label);
+  }).map((standing, index) => ({
+    ...standing,
+    seed: index + 1,
+  }));
+}
+
+export function getPlayoffRoundLabel(pairCount: number): string {
+  if (pairCount === 2) return 'Playoff Final';
+  if (pairCount === 4) return 'Playoff Semifinal';
+  if (pairCount === 8) return 'Playoff Quarterfinal';
+  return `Playoff Round of ${pairCount}`;
+}
+
+export function buildSeededPlayoffMatches(
+  seededPairs: SeededPlayoffPair[],
+  round: number,
+  playoffRound: number
+): Partial<Match>[] {
+  const roundLabel = getPlayoffRoundLabel(seededPairs.length);
+  const sortedPairs = [...seededPairs].sort((left, right) => left.seed - right.seed);
+  const matches: Partial<Match>[] = [];
+
+  for (let index = 0; index < sortedPairs.length / 2; index += 1) {
+    const highSeed = sortedPairs[index];
+    const lowSeed = sortedPairs[sortedPairs.length - 1 - index];
+
+    matches.push({
+      round,
+      stage: 'playoff',
+      playoffRound,
+      roundLabel,
+      seed1: highSeed.seed,
+      seed2: lowSeed.seed,
+      team1: highSeed.playerIds,
+      team2: lowSeed.playerIds,
+      score1: 0,
+      score2: 0,
+      status: 'pending',
+    });
+  }
+
+  return matches;
 }
 
 export interface RoundGenerationSummary {
@@ -291,12 +536,205 @@ function buildRoundGenerationSummary(
   };
 }
 
+function generateFixedPairRoundMatches(
+  players: Player[],
+  round: number,
+  existingMatches: Match[]
+): Partial<Match>[] {
+  const fixedPairingStatus = getFixedPairingStatus(players);
+  if (!fixedPairingStatus.isReady) {
+    return [];
+  }
+
+  const fixedPairs = fixedPairingStatus.pairs;
+  const fixedPairIds = fixedPairs.map((pair) => pair.id);
+  const fixedPairById = new Map(fixedPairs.map((pair) => [pair.id, pair]));
+  const playerToPairId = new Map<string, string>();
+
+  fixedPairs.forEach((pair) => {
+    pair.playerIds.forEach((playerId) => {
+      playerToPairId.set(playerId, pair.id);
+    });
+  });
+
+  const getTeamFixedPairId = (team: string[]) => {
+    const teamPairIds = Array.from(new Set(
+      team
+        .map((playerId) => playerToPairId.get(playerId))
+        .filter((pairId): pairId is string => Boolean(pairId))
+    ));
+    return teamPairIds.length === 1 ? teamPairIds[0] : null;
+  };
+
+  const activeHistory = existingMatches.filter((match) => match.status !== 'void');
+  const latestRound = activeHistory.length > 0 ? Math.max(...activeHistory.map((match) => match.round)) : 0;
+  const fixedPairAppearanceCounts = new Map<string, number>(fixedPairIds.map((pairId) => [pairId, 0]));
+  const fixedPairBenchCounts = new Map<string, number>(fixedPairIds.map((pairId) => [pairId, 0]));
+  const latestBenchStreaks = new Map<string, number>(fixedPairIds.map((pairId) => [pairId, 0]));
+  const opponentPairCounts = new Map<string, number>();
+  const recentOpponentPairs = new Set<string>();
+  const lastRoundBenched = new Set<string>();
+
+  const rounds = Array.from(activeHistory.reduce((map, match) => {
+    const existing = map.get(match.round) || { round: match.round, activePairIds: new Set<string>() };
+    [match.team1, match.team2].forEach((team) => {
+      const pairId = getTeamFixedPairId(team);
+      if (pairId) {
+        existing.activePairIds.add(pairId);
+      }
+    });
+    map.set(match.round, existing);
+    return map;
+  }, new Map<number, { round: number; activePairIds: Set<string> }>()).values()).sort((a, b) => a.round - b.round);
+
+  activeHistory.forEach((match) => {
+    const team1PairId = getTeamFixedPairId(match.team1);
+    const team2PairId = getTeamFixedPairId(match.team2);
+
+    if (team1PairId) {
+      fixedPairAppearanceCounts.set(team1PairId, (fixedPairAppearanceCounts.get(team1PairId) || 0) + 1);
+    }
+    if (team2PairId) {
+      fixedPairAppearanceCounts.set(team2PairId, (fixedPairAppearanceCounts.get(team2PairId) || 0) + 1);
+    }
+    if (team1PairId && team2PairId) {
+      const key = pairKey(team1PairId, team2PairId);
+      opponentPairCounts.set(key, (opponentPairCounts.get(key) || 0) + 1);
+      if (match.round === latestRound) {
+        recentOpponentPairs.add(key);
+      }
+    }
+  });
+
+  rounds.forEach((roundEntry) => {
+    fixedPairIds.forEach((pairId) => {
+      if (!roundEntry.activePairIds.has(pairId)) {
+        fixedPairBenchCounts.set(pairId, (fixedPairBenchCounts.get(pairId) || 0) + 1);
+      }
+    });
+  });
+
+  for (let index = rounds.length - 1; index >= 0; index -= 1) {
+    const roundEntry = rounds[index];
+    fixedPairIds.forEach((pairId) => {
+      if (latestBenchStreaks.get(pairId) === -1) return;
+
+      if (!roundEntry.activePairIds.has(pairId)) {
+        if (index === rounds.length - 1) {
+          lastRoundBenched.add(pairId);
+        }
+        latestBenchStreaks.set(pairId, (latestBenchStreaks.get(pairId) || 0) + 1);
+        return;
+      }
+
+      latestBenchStreaks.set(pairId, -1);
+    });
+  }
+
+  fixedPairIds.forEach((pairId) => {
+    if ((latestBenchStreaks.get(pairId) || 0) < 0) {
+      latestBenchStreaks.set(pairId, 0);
+    }
+  });
+
+  const shuffledFixedPairIds = [...fixedPairIds].sort(() => Math.random() - 0.5);
+  const shuffleOrder = new Map<string, number>(
+    shuffledFixedPairIds.map((pairId, index) => [pairId, index])
+  );
+  const benchCount = fixedPairIds.length % 2;
+  const benchIds = new Set<string>();
+
+  if (benchCount > 0) {
+    const benchPairId = [...fixedPairIds].sort((left, right) => {
+      const leftScore =
+        (fixedPairBenchCounts.get(left) || 0) * 9000 +
+        (latestBenchStreaks.get(left) || 0) * 180000 +
+        (lastRoundBenched.has(left) ? 90000 : 0) -
+        (fixedPairAppearanceCounts.get(left) || 0) * 4500 +
+        (shuffleOrder.get(left) || 0);
+      const rightScore =
+        (fixedPairBenchCounts.get(right) || 0) * 9000 +
+        (latestBenchStreaks.get(right) || 0) * 180000 +
+        (lastRoundBenched.has(right) ? 90000 : 0) -
+        (fixedPairAppearanceCounts.get(right) || 0) * 4500 +
+        (shuffleOrder.get(right) || 0);
+      return leftScore - rightScore;
+    })[0];
+
+    if (benchPairId) {
+      benchIds.add(benchPairId);
+    }
+  }
+
+  const remainingPairIds = shuffledFixedPairIds.filter((pairId) => !benchIds.has(pairId));
+  const roundMatches: Partial<Match>[] = [];
+
+  while (remainingPairIds.length >= 2) {
+    let bestMatch: [string, string] | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    let bestTieBreaker = Number.POSITIVE_INFINITY;
+
+    for (let i = 0; i < remainingPairIds.length; i += 1) {
+      for (let j = i + 1; j < remainingPairIds.length; j += 1) {
+        const pairA = remainingPairIds[i];
+        const pairB = remainingPairIds[j];
+        const key = pairKey(pairA, pairB);
+        const appearanceGap = Math.abs(
+          (fixedPairAppearanceCounts.get(pairA) || 0) -
+          (fixedPairAppearanceCounts.get(pairB) || 0)
+        );
+        const score =
+          (opponentPairCounts.get(key) || 0) * 3500 +
+          (recentOpponentPairs.has(key) ? 10000 : 0) +
+          appearanceGap * 200;
+        const tieBreaker = (shuffleOrder.get(pairA) || 0) + (shuffleOrder.get(pairB) || 0);
+
+        if (score < bestScore || (score === bestScore && tieBreaker < bestTieBreaker)) {
+          bestMatch = [pairA, pairB];
+          bestScore = score;
+          bestTieBreaker = tieBreaker;
+        }
+      }
+    }
+
+    if (!bestMatch) break;
+
+    const team1 = fixedPairById.get(bestMatch[0])?.playerIds;
+    const team2 = fixedPairById.get(bestMatch[1])?.playerIds;
+    if (!team1 || !team2) break;
+
+    roundMatches.push({
+      round,
+      team1,
+      team2,
+      score1: 0,
+      score2: 0,
+      status: 'pending',
+    });
+
+    bestMatch.forEach((pairId) => {
+      fixedPairAppearanceCounts.set(pairId, (fixedPairAppearanceCounts.get(pairId) || 0) + 1);
+      const index = remainingPairIds.indexOf(pairId);
+      if (index >= 0) {
+        remainingPairIds.splice(index, 1);
+      }
+    });
+  }
+
+  return roundMatches;
+}
+
 export function generateRoundMatches(
   players: Player[],
   round: number,
   format?: TournamentFormat | null,
-  existingMatches: Match[] = []
+  existingMatches: Match[] = [],
+  pairingMode?: TournamentPairingMode | null
 ): Partial<Match>[] {
+  if (getTournamentPairingMode(pairingMode, format) === 'fixed') {
+    return generateFixedPairRoundMatches(players, round, existingMatches);
+  }
+
   const activeHistory = existingMatches.filter((match) => match.status !== 'void');
   const latestRound = activeHistory.length > 0 ? Math.max(...activeHistory.map((match) => match.round)) : 0;
   const latestRoundMatches = activeHistory.filter((match) => match.round === latestRound);
