@@ -19,7 +19,7 @@ import {
   limit,
   Timestamp
 } from 'firebase/firestore';
-import { auth, db, signIn, logout, Tournament, TournamentFormat, TournamentPairingMode, handleFirestoreError } from './lib/firebase';
+import { auth, db, signIn, logout, Tournament, TournamentFormat, TournamentPairingMode, getReadableFirestoreError } from './lib/firebase';
 import {
   DEFAULT_TOURNAMENT_FORMAT,
   DEFAULT_TOURNAMENT_PAIRING_MODE,
@@ -717,7 +717,7 @@ export default function App() {
       await recordTournamentJoin(docRef.id, tournamentName, code, 'owner', newTournamentFormat);
       setActiveTournamentId(docRef.id);
     } catch (e) {
-      handleFirestoreError(e, 'create', 'tournaments');
+      setError(getReadableFirestoreError(e, 'Unable to create the tournament right now.'));
     } finally {
       setLoading(false);
     }
