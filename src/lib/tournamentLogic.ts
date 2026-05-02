@@ -986,6 +986,48 @@ export function summarizeRoundGeneration(
   return buildRoundGenerationSummary(matches, existingMatches, format);
 }
 
+export interface SessionAdjustmentPlan {
+  pendingMatchesToVoid: Match[];
+  replacementPlayers: Player[];
+  replacementMatches: Partial<Match>[];
+}
+
+export function buildSessionAdjustmentPlan(
+  players: Player[],
+  matches: Match[],
+  round: number,
+  format: TournamentFormat,
+  pairingMode: TournamentPairingMode,
+  absences: Record<string, SessionAbsence>
+): SessionAdjustmentPlan {
+  const pendingMatchesToVoid = matches.filter((match) => (
+    match.round === round && match.status === 'pending' && match.stage !== 'playoff'
+  ));
+  const completedCurrentRoundPlayerIds = new Set(
+    matches
+      .filter((match) => match.round === round && match.status === 'completed')
+      .flatMap((match) => [...match.team1, ...match.team2])
+  );
+  const sittingOutIds = new Set(
+    Object.keys(absences).length > 0 ? getSittingOutPlayerIds(players, absences) : []
+  );
+  const replacementPlayers = players.filter((player) => (
+    !sittingOutIds.has(player.id) && !completedCurrentRoundPlayerIds.has(player.id)
+  ));
+  const roundHistory = matches.filter((match) => !(
+    match.round === round && match.status === 'pending'
+  ));
+  const replacementMatches = replacementPlayers.length >= getMinimumPlayers(format)
+    ? generateRoundMatches(replacementPlayers, round, format, roundHistory, pairingMode)
+    : [];
+
+  return {
+    pendingMatchesToVoid,
+    replacementPlayers,
+    replacementMatches,
+  };
+}
+
 export function filterMatchesBySession(matches: Match[], session: Session): Match[] {
   return matches.filter((m) =>
     m.round >= session.startRound &&

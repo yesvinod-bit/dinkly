@@ -4,6 +4,7 @@ import { buildInviteUrl, buildSpectatorUrl, getPublicAppOrigin, getPublicAppUrl 
 import { buildProfileAdvice, type ProfileAdviceStats } from './src/lib/profileAdvice.ts';
 import {
   buildSeededPlayoffMatches,
+  buildSessionAdjustmentPlan,
   generateRoundMatches,
   getFixedPairingStatus,
   getFixedPairStandings,
@@ -248,6 +249,94 @@ function testSeededPlayoffMatchGeneration() {
   assert.equal(matches[1].seed2, 3);
 }
 
+function testSessionAdjustmentRebuildsPendingRandomDoubles() {
+  const players = mockPlayers(8) as any as MockPlayer[];
+  const matches = toHistoryMatches([
+    { round: 1, team1: ['p0', 'p1'], team2: ['p2', 'p3'], score1: 0, score2: 0, status: 'pending' },
+    { round: 1, team1: ['p4', 'p5'], team2: ['p6', 'p7'], score1: 0, score2: 0, status: 'pending' },
+  ], 1);
+
+  const plan = buildSessionAdjustmentPlan(players as any, matches, 1, 'doubles', 'random', {
+    p0: { subName: null },
+  });
+
+  assert.equal(plan.pendingMatchesToVoid.length, 2, 'all pending current-round games should be voided');
+  assert.equal(plan.replacementMatches.length, 1, '7 available doubles players should rebuild one game');
+  const replacementPlayerIds = new Set(plan.replacementMatches.flatMap((match) => [...(match.team1 ?? []), ...(match.team2 ?? [])]));
+  assert.equal(replacementPlayerIds.has('p0'), false, 'player who left should not be scheduled');
+  assert.equal(replacementPlayerIds.size, 4, 'replacement doubles game should have four unique players');
+}
+
+function testSessionAdjustmentPreservesCompletedGames() {
+  const players = mockPlayers(8) as any as MockPlayer[];
+  const matches: Match[] = [
+    {
+      ...toHistoryMatches([
+        { round: 2, team1: ['p0', 'p1'], team2: ['p2', 'p3'], score1: 11, score2: 7, status: 'completed' },
+      ], 2)[0],
+      status: 'completed',
+      score1: 11,
+      score2: 7,
+    },
+    ...toHistoryMatches([
+      { round: 2, team1: ['p4', 'p5'], team2: ['p6', 'p7'], score1: 0, score2: 0, status: 'pending' },
+    ], 2),
+  ];
+
+  const plan = buildSessionAdjustmentPlan(players as any, matches, 2, 'doubles', 'random', {
+    p4: { subName: null },
+  });
+
+  assert.equal(plan.pendingMatchesToVoid.length, 1, 'only pending games should be voided');
+  assert.equal(plan.pendingMatchesToVoid[0].status, 'pending');
+  assert.deepEqual(
+    plan.replacementPlayers.map((player) => player.id).sort(),
+    ['p5', 'p6', 'p7'],
+    'completed-round players and the leaving player should be excluded from replacements'
+  );
+  assert.equal(plan.replacementMatches.length, 0, 'three remaining doubles players cannot form a replacement game');
+}
+
+function testSessionAdjustmentKeepsSubsActive() {
+  const players = mockPlayers(4) as any as MockPlayer[];
+  const matches = toHistoryMatches([
+    { round: 1, team1: ['p0', 'p1'], team2: ['p2', 'p3'], score1: 0, score2: 0, status: 'pending' },
+  ], 1);
+
+  const plan = buildSessionAdjustmentPlan(players as any, matches, 1, 'doubles', 'random', {
+    p0: { subName: 'Sub Zero' },
+  });
+
+  const replacementPlayerIds = new Set(plan.replacementMatches.flatMap((match) => [...(match.team1 ?? []), ...(match.team2 ?? [])]));
+  assert.equal(plan.replacementMatches.length, 1, 'a player with a sub should keep the slot active');
+  assert.equal(replacementPlayerIds.has('p0'), true, 'subbed player id should remain in generated games for display substitution');
+}
+
+function testSessionAdjustmentHonorsFixedPairSitOuts() {
+  const players = mockPlayers(6) as any as MockPlayer[];
+  players[0].fixedPairId = 'pair-a';
+  players[1].fixedPairId = 'pair-a';
+  players[2].fixedPairId = 'pair-b';
+  players[3].fixedPairId = 'pair-b';
+  players[4].fixedPairId = 'pair-c';
+  players[5].fixedPairId = 'pair-c';
+  const matches = toHistoryMatches([
+    { round: 1, team1: ['p0', 'p1'], team2: ['p2', 'p3'], score1: 0, score2: 0, status: 'pending' },
+  ], 1);
+
+  const plan = buildSessionAdjustmentPlan(players as any, matches, 1, 'doubles', 'fixed', {
+    p0: { subName: null },
+  });
+
+  assert.deepEqual(
+    plan.replacementPlayers.map((player) => player.id).sort(),
+    ['p2', 'p3', 'p4', 'p5'],
+    'a missing fixed-pair player without a sub should sit out the whole pair'
+  );
+  assert.equal(plan.replacementMatches.length, 1, 'two remaining fixed pairs should play');
+  assertUniquePlayersPerRound(plan.replacementMatches);
+}
+
 function testPublicAppUrls() {
   assert.equal(getPublicAppOrigin('https://dinkly.net'), 'https://dinkly.net');
   assert.equal(
@@ -325,6 +414,10 @@ function main() {
   testFixedPairRoundGeneration();
   testFixedPairStandingsByStage();
   testSeededPlayoffMatchGeneration();
+  testSessionAdjustmentRebuildsPendingRandomDoubles();
+  testSessionAdjustmentPreservesCompletedGames();
+  testSessionAdjustmentKeepsSubsActive();
+  testSessionAdjustmentHonorsFixedPairSitOuts();
   testPublicAppUrls();
   testProfileAdvice();
   console.log('logic tests passed');

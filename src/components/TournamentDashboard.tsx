@@ -27,6 +27,7 @@ import {
 } from '../lib/firebase';
 import {
   buildSeededPlayoffMatches,
+  buildSessionAdjustmentPlan,
   filterMatchesBySession,
   generateRoundMatches,
   getFixedPairingStatus,
@@ -52,7 +53,8 @@ import {
   X,
   Copy,
   CheckCircle2,
-  CalendarDays
+  CalendarDays,
+  UserMinus
 } from 'lucide-react';
 import Leaderboard from './Leaderboard';
 import MatchList from './MatchList';
@@ -121,6 +123,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   const [joinLinkCopied, setJoinLinkCopied] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [isSessionManagerOpen, setIsSessionManagerOpen] = useState(false);
+  const [sessionManagerMode, setSessionManagerMode] = useState<'new' | 'adjust'>('new');
   const [isStartingSession, setIsStartingSession] = useState(false);
 
   useEffect(() => {
@@ -202,7 +205,9 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   const isLeague = Boolean(tournament?.leagueMode);
   const currentSession = sessions.find((s) => s.status === 'active') ?? sessions[sessions.length - 1] ?? null;
   const currentSessionAbsences = currentSession?.absences ?? {};
-  const canStartNewSession = isLeague && canManageTournament && tournament?.status === 'active' && !playoffStarted && gamesLeftInRound === 0 && currentRound > 0;
+  const canStartNewSession = canManageTournament && tournament?.status === 'active' && !playoffStarted && gamesLeftInRound === 0 && currentRound > 0;
+  const canAdjustCurrentSession = canManageTournament && tournament?.status === 'active' && !playoffStarted && currentSession?.status === 'active' && gamesLeftInRound > 0 && currentRound >= currentSession.startRound;
+  const canGenerateNextRound = canManageTournament && tournament?.status === 'active' && !playoffStarted && matches.length > 0 && gamesLeftInRound === 0;
 
   useEffect(() => {
     const currentUser = auth.currentUser;
@@ -290,6 +295,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
       await updateDoc(doc(db, 'tournaments', tournamentId), { status: 'active' });
       setTab('matches');
       if (isLeague) {
+        setSessionManagerMode('new');
         setIsSessionManagerOpen(true);
       } else {
         await generateNextRound();
@@ -321,7 +327,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
         return;
       }
 
-      const absences = overrideAbsences ?? (isLeague ? currentSessionAbsences : {});
+      const absences = overrideAbsences ?? (currentSession ? currentSessionAbsences : {});
       const sittingOutIds = new Set(
         Object.keys(absences).length > 0 ? getSittingOutPlayerIds(players, absences) : []
       );
@@ -393,6 +399,87 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
     } catch (e) {
       console.error('Session start failed:', e);
       const message = getReadableFirestoreError(e, 'Unable to start the session right now.');
+      setRoundActionError(message);
+    } finally {
+      setIsStartingSession(false);
+    }
+  };
+
+  const adjustCurrentSession = async (name: string, absences: Record<string, SessionAbsence>) => {
+    if (!canManageTournament || !currentSession) return;
+    setIsStartingSession(true);
+    setRoundActionError(null);
+
+    try {
+      if (playoffStarted) {
+        setRoundActionError('Playoffs have started. Session adjustments are disabled.');
+        return;
+      }
+
+      const adjustmentPlan = buildSessionAdjustmentPlan(
+        players,
+        matches,
+        currentRound,
+        tournamentFormat,
+        tournamentPairingMode,
+        absences
+      );
+      const pendingCurrentRoundMatches = adjustmentPlan.pendingMatchesToVoid;
+      if (pendingCurrentRoundMatches.length === 0) {
+        await updateDoc(doc(db, 'tournaments', tournamentId, 'sessions', currentSession.id), {
+          name,
+          absences,
+          updatedAt: serverTimestamp(),
+        });
+        setIsSessionManagerOpen(false);
+        return;
+      }
+
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'tournaments', tournamentId, 'sessions', currentSession.id), {
+        name,
+        absences,
+        updatedAt: serverTimestamp(),
+      });
+
+      pendingCurrentRoundMatches.forEach((match) => {
+        batch.update(doc(db, 'tournaments', tournamentId, 'matches', match.id), {
+          score1: 0,
+          score2: 0,
+          status: 'void',
+          updatedAt: serverTimestamp(),
+          completedAt: null,
+          voidedAt: serverTimestamp(),
+          statusBeforeVoid: match.status,
+          previousScore1: match.score1,
+          previousScore2: match.score2,
+          previousCompletedAt: match.completedAt ?? null,
+        });
+      });
+
+      adjustmentPlan.replacementMatches.forEach((match) => {
+        const ref = doc(collection(db, 'tournaments', tournamentId, 'matches'));
+        batch.set(ref, {
+          ...match,
+          updatedAt: serverTimestamp(),
+          completedAt: null,
+          voidedAt: null,
+          statusBeforeVoid: null,
+          previousScore1: null,
+          previousScore2: null,
+          previousCompletedAt: null,
+        });
+      });
+
+      await batch.commit();
+      setIsSessionManagerOpen(false);
+
+      if (adjustmentPlan.replacementMatches.length === 0) {
+        setRoundActionError('Session updated. Pending games were voided, but there are not enough remaining players for replacement games.');
+      }
+    } catch (e) {
+      console.error('Session adjustment failed:', e);
+      const message = getReadableFirestoreError(e, 'Unable to adjust the session right now.');
       setRoundActionError(message);
     } finally {
       setIsStartingSession(false);
@@ -782,9 +869,16 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
         {isSessionManagerOpen && (
           <SessionManager
             players={players}
-            sessionNumber={sessions.length + 1}
+            sessionNumber={sessionManagerMode === 'adjust' && currentSession ? sessions.findIndex((session) => session.id === currentSession.id) + 1 : sessions.length + 1}
+            format={tournamentFormat}
+            pairingMode={tournamentPairingMode}
+            initialName={sessionManagerMode === 'adjust' ? currentSession?.name : undefined}
+            initialAbsences={sessionManagerMode === 'adjust' ? currentSessionAbsences : undefined}
+            heading={sessionManagerMode === 'adjust' ? 'Who Changed?' : undefined}
+            actionLabel={sessionManagerMode === 'adjust' ? 'Save & Rebuild' : 'Start Session'}
+            allowBelowMinimum={sessionManagerMode === 'adjust'}
             isCreating={isStartingSession}
-            onConfirm={startNewSession}
+            onConfirm={sessionManagerMode === 'adjust' ? adjustCurrentSession : startNewSession}
             onCancel={() => setIsSessionManagerOpen(false)}
           />
         )}
@@ -834,9 +928,27 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                       </span>
                     </button>
                   )}
+                  {canAdjustCurrentSession && (
+                    <button
+                      onClick={() => {
+                        setSessionManagerMode('adjust');
+                        setIsSessionManagerOpen(true);
+                      }}
+                      disabled={isGeneratingRound || isStartingSession}
+                      className="rounded-2xl border-2 border-slate-800 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <UserMinus className="h-3.5 w-3.5" />
+                        Player Left
+                      </span>
+                    </button>
+                  )}
                   {canStartNewSession && (
                     <button
-                      onClick={() => setIsSessionManagerOpen(true)}
+                      onClick={() => {
+                        setSessionManagerMode('new');
+                        setIsSessionManagerOpen(true);
+                      }}
                       disabled={isGeneratingRound || isStartingSession}
                       className="rounded-2xl border-2 border-slate-800 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
                     >
@@ -846,7 +958,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                       </span>
                     </button>
                   )}
-                  {canManageTournament && tournament?.status === 'active' && !playoffStarted && (!isLeague || sessions.length > 0) && (
+                  {canGenerateNextRound && (
                     <button
                       onClick={() => generateNextRound()}
                       disabled={isGeneratingRound}
