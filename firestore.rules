@@ -73,12 +73,13 @@ service cloud.firestore {
     match /tournaments/{tournamentId} {
       function isValidTournamentDocument(data) {
         return data.keys().hasAll(['name', 'code', 'ownerId', 'status', 'createdAt']) &&
-               data.keys().hasOnly(['name', 'code', 'ownerId', 'format', 'pairingMode', 'status', 'createdAt', 'updatedAt']) &&
+               data.keys().hasOnly(['name', 'code', 'ownerId', 'format', 'pairingMode', 'leagueMode', 'status', 'createdAt', 'updatedAt']) &&
                data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
                data.code is string && data.code.matches('^[A-Z0-9]{6}$') &&
                data.ownerId == request.auth.uid &&
                (!data.keys().hasAny(['format']) || data.format in ['singles', 'doubles']) &&
                (!data.keys().hasAny(['pairingMode']) || data.pairingMode in ['random', 'fixed']) &&
+               (!data.keys().hasAny(['leagueMode']) || data.leagueMode is bool) &&
                data.status in ['setup', 'active', 'completed'] &&
                data.createdAt is timestamp &&
                (!data.keys().hasAny(['updatedAt']) || data.updatedAt is timestamp);
