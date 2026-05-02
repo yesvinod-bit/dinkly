@@ -1454,21 +1454,20 @@ export default function App() {
                           e.stopPropagation();
                           setNewLeagueMode((prev) => !prev);
                         }}
-                        className={`mb-3 flex w-full items-center gap-3 rounded-xl border-2 px-3 py-2.5 text-left transition-all ${
-                          newLeagueMode
-                            ? 'border-slate-800 bg-white shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]'
-                            : 'border-slate-300 bg-white/40 opacity-70'
-                        }`}
+                        className="mb-3 flex w-full items-center justify-between gap-3 rounded-xl border-2 border-slate-800 bg-white px-3 py-2.5 text-left shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)] transition-all"
                         aria-pressed={newLeagueMode}
                       >
-                        <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border-2 border-slate-800 transition-colors ${newLeagueMode ? 'bg-lime-400' : 'bg-white'}`}>
-                          <Repeat2 className="h-3.5 w-3.5 text-slate-800" />
-                        </div>
-                        <div>
-                          <div className="text-[10px] font-black uppercase text-slate-800">League Mode</div>
-                          <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
-                            Multi-session · Absence tracking · Season standings
+                        <div className="flex items-center gap-2.5">
+                          <Repeat2 className="h-3.5 w-3.5 shrink-0 text-slate-700" />
+                          <div>
+                            <div className="text-[10px] font-black uppercase text-slate-800">League Mode</div>
+                            <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                              Multi-session · Absences · Season standings
+                            </div>
                           </div>
+                        </div>
+                        <div className={`relative h-6 w-11 shrink-0 rounded-full border-2 border-slate-800 transition-colors ${newLeagueMode ? 'bg-lime-400' : 'bg-slate-200'}`}>
+                          <div className={`absolute top-0.5 h-4 w-4 rounded-full border-2 border-slate-800 bg-white transition-transform ${newLeagueMode ? 'translate-x-5' : 'translate-x-0.5'}`} />
                         </div>
                       </button>
                     )}
