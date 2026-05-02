@@ -28,6 +28,7 @@ import {
 import {
   buildSeededPlayoffMatches,
   buildSessionAdjustmentPlan,
+  buildSessionName,
   filterMatchesBySession,
   generateRoundMatches,
   getFixedPairingStatus,
@@ -202,7 +203,6 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   const gamesLeftInRound = currentRoundMatches.filter((match) => match.status === 'pending').length;
   const canCloseTournament = canManageTournament && tournament?.status === 'active' && matches.length > 0 && gamesLeftInRound === 0;
   const joinUrl = typeof window !== 'undefined' ? buildJoinUrl(window.location.origin, tournamentId) : '';
-  const isLeague = Boolean(tournament?.leagueMode);
   const currentSession = sessions.find((s) => s.status === 'active') ?? sessions[sessions.length - 1] ?? null;
   const currentSessionAbsences = currentSession?.absences ?? {};
   const canStartNewSession = canManageTournament && tournament?.status === 'active' && !playoffStarted && gamesLeftInRound === 0 && currentRound > 0;
@@ -294,12 +294,14 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
     try {
       await updateDoc(doc(db, 'tournaments', tournamentId), { status: 'active' });
       setTab('matches');
-      if (isLeague) {
-        setSessionManagerMode('new');
-        setIsSessionManagerOpen(true);
-      } else {
-        await generateNextRound();
-      }
+      await addDoc(collection(db, 'tournaments', tournamentId, 'sessions'), {
+        name: buildSessionName(1),
+        startRound: 1,
+        status: 'active',
+        absences: {},
+        createdAt: serverTimestamp(),
+      });
+      await generateNextRound({});
     } catch (e) {
       const message = getReadableFirestoreError(e, 'Unable to start the tournament right now.');
       setRoundActionError(message);
@@ -906,7 +908,6 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                 canAddPlayers={canContributePlayers}
                 isOwner={canManageTournament}
                 status={tournament?.status || 'setup'}
-                isLeague={isLeague}
                 onStart={startTournament}
               />
             </motion.div>
@@ -914,20 +915,31 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
 
           {tab === 'matches' && (
             <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
-              <div className="flex items-center justify-between mb-6 md:mb-8">
-                <h2 className="text-xl md:text-3xl font-black text-slate-800">COURT TRACKER</h2>
-                <div className="flex flex-wrap justify-end gap-2">
-                  {canCloseTournament && (
+              <div className="mb-6 space-y-3 md:mb-8">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-black text-slate-800 md:text-3xl">COURT TRACKER</h2>
+                    {currentSession && (
+                      <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                        {currentSession.name}
+                      </p>
+                    )}
+                  </div>
+                  {canGenerateNextRound && (
                     <button
-                      onClick={completeTournament}
-                      className="rounded-2xl border-2 border-slate-800 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
+                      onClick={() => generateNextRound()}
+                      disabled={isGeneratingRound}
+                      className="brutal-button-lime shrink-0 px-3 py-2 md:px-6 md:py-3"
                     >
-                      <span className="inline-flex items-center gap-2">
-                        <Flag className="h-3.5 w-3.5" />
-                        Close Tournament
-                      </span>
+                      <div className="flex items-center gap-1.5 md:gap-2">
+                        {isGeneratingRound ? <Loader2 className="h-4 w-4 animate-spin md:h-5 md:w-5" /> : <Plus className="h-4 w-4 md:h-5 md:w-5" />}
+                        <span className="text-xs sm:text-sm">{isGeneratingRound ? 'BUILDING...' : 'NEXT ROUND'}</span>
+                      </div>
                     </button>
                   )}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
                   {canAdjustCurrentSession && (
                     <button
                       onClick={() => {
@@ -935,7 +947,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                         setIsSessionManagerOpen(true);
                       }}
                       disabled={isGeneratingRound || isStartingSession}
-                      className="rounded-2xl border-2 border-slate-800 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
+                      className="min-h-10 rounded-xl border-2 border-slate-800 bg-orange-50 px-3 py-2 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
                     >
                       <span className="inline-flex items-center gap-2">
                         <UserMinus className="h-3.5 w-3.5" />
@@ -950,7 +962,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                         setIsSessionManagerOpen(true);
                       }}
                       disabled={isGeneratingRound || isStartingSession}
-                      className="rounded-2xl border-2 border-slate-800 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
+                      className="min-h-10 rounded-xl border-2 border-slate-800 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
                     >
                       <span className="inline-flex items-center gap-2">
                         <CalendarDays className="h-3.5 w-3.5" />
@@ -958,16 +970,15 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                       </span>
                     </button>
                   )}
-                  {canGenerateNextRound && (
+                  {canCloseTournament && (
                     <button
-                      onClick={() => generateNextRound()}
-                      disabled={isGeneratingRound}
-                      className="brutal-button-lime py-2 px-3 md:py-3 md:px-6"
+                      onClick={completeTournament}
+                      className="min-h-10 rounded-xl border-2 border-slate-800 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
                     >
-                      <div className="flex items-center gap-1.5 md:gap-2">
-                        {isGeneratingRound ? <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Plus className="w-4 h-4 md:w-5 md:h-5" />}
-                        <span className="text-xs sm:text-sm">{isGeneratingRound ? 'BUILDING ROUND...' : 'NEXT ROUND'}</span>
-                      </div>
+                      <span className="inline-flex items-center gap-2">
+                        <Flag className="h-3.5 w-3.5" />
+                        Close Tournament
+                      </span>
                     </button>
                   )}
                 </div>
