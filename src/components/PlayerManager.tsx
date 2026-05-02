@@ -22,10 +22,11 @@ interface Props {
   canAddPlayers: boolean;
   isOwner: boolean;
   status: string;
+  isLeague?: boolean;
   onStart: () => void;
 }
 
-export default function PlayerManager({ tournamentId, players, format, pairingMode, canAddPlayers, isOwner, status, onStart }: Props) {
+export default function PlayerManager({ tournamentId, players, format, pairingMode, canAddPlayers, isOwner, status, isLeague = false, onStart }: Props) {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busyPlayerId, setBusyPlayerId] = useState<string | null>(null);
@@ -439,7 +440,7 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
             }`}
           >
             <PlayCircle className="w-6 h-6" />
-            KICK OFF TOURNAMENT ({players.length}/{minimumPlayers}+ READY)
+            {isLeague ? `START LEAGUE (${players.length}/${minimumPlayers}+ READY)` : `KICK OFF TOURNAMENT (${players.length}/${minimumPlayers}+ READY)`}
           </button>
         )}
       </div>

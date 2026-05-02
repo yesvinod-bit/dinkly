@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Match, Player, TournamentFormat, TournamentPairingMode } from '../lib/firebase';
+import { Match, Player, Session, TournamentFormat, TournamentPairingMode } from '../lib/firebase';
 import {
+  filterMatchesBySession,
   getFixedPairStandings,
   getTournamentFormat,
   getTournamentPairingMode
 } from '../lib/tournamentLogic';
-import { CheckSquare, Crown, Medal, PlayCircle, Sparkles, Square, Trophy, User, Users } from 'lucide-react';
+import { CheckSquare, Crown, Medal, PlayCircle, Sparkles, Square, Trophy, User, Users, CalendarDays } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface Props {
@@ -18,6 +19,8 @@ interface Props {
   playoffActionError?: string | null;
   onCreatePlayoffRound?: (pairIds: string[]) => Promise<void> | void;
   onCreateNextPlayoffRound?: () => Promise<void> | void;
+  sessions?: Session[];
+  currentSession?: Session | null;
 }
 
 interface RankedStanding {
@@ -121,23 +124,32 @@ export default function Leaderboard({
   playoffActionError = null,
   onCreatePlayoffRound,
   onCreateNextPlayoffRound,
+  sessions = [],
+  currentSession = null,
 }: Props) {
   const [selectedPairIds, setSelectedPairIds] = useState<string[]>([]);
   const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [standingsView, setStandingsView] = useState<'season' | 'session'>('season');
   const tournamentFormat = getTournamentFormat(format);
   const tournamentPairingMode = getTournamentPairingMode(pairingMode, tournamentFormat);
   const isFixedPairLeaderboard = tournamentFormat === 'doubles' && tournamentPairingMode === 'fixed';
+  const isLeague = sessions.length > 0;
   const playoffStarted = matches.some((match) => match.stage === 'playoff');
+
+  const standingsMatches = standingsView === 'session' && currentSession
+    ? filterMatchesBySession(matches, currentSession)
+    : matches;
+
   const preliminaryStandings = isFixedPairLeaderboard
-    ? getFixedPairStandings(players, matches, 'preliminary').map((standing) => ({
-      ...standing,
-      name: standing.label,
-    }))
-    : buildPlayerStandings(players, matches);
+    ? getFixedPairStandings(players, standingsMatches, 'preliminary').map((standing) => ({
+        ...standing,
+        name: standing.label,
+      }))
+    : buildPlayerStandings(players, standingsMatches);
   const playoffStandings = isFixedPairLeaderboard
     ? getFixedPairStandings(players, matches, 'playoff')
-      .filter((standing) => standing.gamesPlayed > 0)
-      .map((standing) => ({ ...standing, name: standing.label }))
+        .filter((standing) => standing.gamesPlayed > 0)
+        .map((standing) => ({ ...standing, name: standing.label }))
     : [];
   const canSelectPlayoffPairs = isFixedPairLeaderboard && canManageTournament && !playoffStarted;
 
@@ -339,12 +351,50 @@ export default function Leaderboard({
   if (isFixedPairLeaderboard) {
     return (
       <div className="space-y-6">
+        {isLeague && sessions.length >= 1 && !playoffStarted && (
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 rounded-2xl border-2 border-slate-800 bg-white p-1 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]">
+              <CalendarDays className="ml-2 h-4 w-4 text-slate-500" />
+              <button
+                type="button"
+                onClick={() => setStandingsView('season')}
+                className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase transition-all ${
+                  standingsView === 'season' ? 'bg-lime-400 text-slate-900 shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Season
+              </button>
+              <button
+                type="button"
+                onClick={() => setStandingsView('session')}
+                className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase transition-all ${
+                  standingsView === 'session' ? 'bg-orange-500 text-white shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                This Session
+              </button>
+            </div>
+            {currentSession && (
+              <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                {currentSession.name}
+              </span>
+            )}
+          </div>
+        )}
         {renderStandingCard({
           rows: preliminaryStandings,
-          title: playoffStarted ? 'PRELIMINARY STANDINGS' : 'PAIR STANDINGS',
+          title: playoffStarted
+            ? 'PRELIMINARY STANDINGS'
+            : standingsView === 'session' && isLeague
+              ? 'SESSION STANDINGS'
+              : 'PAIR STANDINGS',
           subtitle: playoffStarted
             ? 'Preliminary standings are frozen. Playoff standings track knockout results separately.'
-            : 'Select an even number of fixed pairs to create a seeded knockout round.',
+            : standingsView === 'session' && isLeague
+              ? `Results for ${currentSession?.name ?? 'current session'} only.`
+              : isLeague
+                ? 'Season totals across all sessions. Select pairs to start playoffs.'
+                : 'Select an even number of fixed pairs to create a seeded knockout round.',
           competitorLabel: 'Pair',
           selectable: canSelectPlayoffPairs,
         })}

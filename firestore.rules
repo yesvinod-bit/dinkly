@@ -403,6 +403,27 @@ service cloud.firestore {
                       isParticipantScoreUpdate();
       }
 
+      match /sessions/{sessionId} {
+        allow read: if true;
+        allow create: if isValidId(tournamentId) &&
+                      isValidId(sessionId) &&
+                      tournamentExists(tournamentId) &&
+                      isOwner(tournamentId) &&
+                      incoming().keys().hasAll(['name', 'startRound', 'status', 'absences', 'createdAt']) &&
+                      incoming().name is string &&
+                      incoming().name.size() > 0 &&
+                      incoming().name.size() <= 100 &&
+                      incoming().startRound is number &&
+                      incoming().startRound >= 1 &&
+                      incoming().status in ['active', 'completed'] &&
+                      incoming().absences is map &&
+                      incoming().createdAt is timestamp;
+        allow update: if isValidId(tournamentId) &&
+                      isValidId(sessionId) &&
+                      tournamentExists(tournamentId) &&
+                      isOwner(tournamentId);
+      }
+
       match /scoreNotifications/{notificationId} {
         function isValidScoreNotification(data) {
           return data.keys().hasAll([

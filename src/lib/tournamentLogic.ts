@@ -1,4 +1,4 @@
-import type { Match, Player, TournamentFormat, TournamentPairingMode, TournamentStage } from './firebase.ts';
+import type { Match, Player, Session, SessionAbsence, TournamentFormat, TournamentPairingMode, TournamentStage } from './firebase.ts';
 
 export const DEFAULT_TOURNAMENT_FORMAT: TournamentFormat = 'doubles';
 export const DEFAULT_TOURNAMENT_PAIRING_MODE: TournamentPairingMode = 'random';
@@ -984,6 +984,40 @@ export function summarizeRoundGeneration(
   format?: TournamentFormat | null
 ): RoundGenerationSummary {
   return buildRoundGenerationSummary(matches, existingMatches, format);
+}
+
+export function filterMatchesBySession(matches: Match[], session: Session): Match[] {
+  return matches.filter((m) =>
+    m.round >= session.startRound &&
+    (session.endRound === undefined || m.round <= session.endRound)
+  );
+}
+
+export function getSittingOutPlayerIds(players: Player[], absences: Record<string, SessionAbsence>): string[] {
+  const absentNoSubIds = players
+    .filter((p) => p.id in absences && absences[p.id].subName === null)
+    .map((p) => p.id);
+
+  const sittingOutPairIds = new Set<string>(
+    players
+      .filter((p) => absentNoSubIds.includes(p.id) && p.fixedPairId)
+      .map((p) => p.fixedPairId as string)
+  );
+
+  return players
+    .filter((p) => absentNoSubIds.includes(p.id) || (p.fixedPairId && sittingOutPairIds.has(p.fixedPairId)))
+    .map((p) => p.id);
+}
+
+export function getSessionForRound(round: number, sessions: Session[]): Session | undefined {
+  return sessions.find((s) =>
+    round >= s.startRound && (s.endRound === undefined || round <= s.endRound)
+  );
+}
+
+export function buildSessionName(sessionNumber: number): string {
+  const date = new Date();
+  return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} — Session ${sessionNumber}`;
 }
 
 export function generateCode(): string {

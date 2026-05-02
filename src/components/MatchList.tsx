@@ -6,9 +6,9 @@ import {
   writeBatch,
   Timestamp
 } from 'firebase/firestore';
-import { db, auth, Player, Match, TournamentFormat, getReadableFirestoreError, handleFirestoreError } from '../lib/firebase';
-import { getTournamentFormat } from '../lib/tournamentLogic';
-import { CheckCircle2, ChevronRight, User, Swords, Share2, RotateCcw, Clock3, Pencil, PartyPopper, Sparkles } from 'lucide-react';
+import { db, auth, Player, Match, Session, SessionAbsence, TournamentFormat, getReadableFirestoreError, handleFirestoreError } from '../lib/firebase';
+import { getSessionForRound, getTournamentFormat } from '../lib/tournamentLogic';
+import { CalendarDays, CheckCircle2, ChevronRight, User, Swords, Share2, RotateCcw, Clock3, Pencil, PartyPopper, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface Props {
@@ -20,6 +20,8 @@ interface Props {
   isOwner: boolean;
   canEnterScores?: boolean;
   readOnly?: boolean;
+  sessions?: Session[];
+  sessionAbsences?: Record<string, SessionAbsence>;
 }
 
 interface ScoreCelebration {
@@ -99,7 +101,7 @@ function ScoreCelebrationOverlay({ celebration }: { celebration: ScoreCelebratio
   );
 }
 
-export default function MatchList({ tournamentId, tournamentName, format, matches, players, isOwner, canEnterScores = false, readOnly = false }: Props) {
+export default function MatchList({ tournamentId, tournamentName, format, matches, players, isOwner, canEnterScores = false, readOnly = false, sessions = [], sessionAbsences = {} }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [score1, setScore1] = useState<string>('');
   const [score2, setScore2] = useState<string>('');
@@ -113,7 +115,15 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
   const canManageGameActions = isOwner && !readOnly;
   const playoffStarted = matches.some((match) => match.stage === 'playoff');
 
-  const getPlayerName = (id: string) => players.find(p => p.id === id)?.name || 'Unknown';
+  const getPlayerName = (id: string) => players.find((p) => p.id === id)?.name || 'Unknown';
+
+  const getPlayerDisplayName = (id: string, round: number) => {
+    const name = getPlayerName(id);
+    const session = sessions.length > 0 ? getSessionForRound(round, sessions) : null;
+    const absence = session?.absences[id];
+    if (absence?.subName) return `${absence.subName} (for ${name})`;
+    return name;
+  };
   const competitorLabel = tournamentFormat === 'singles' ? 'Player' : 'Team';
   const isFrozenPreliminaryMatch = (match: Match) => playoffStarted && match.stage !== 'playoff';
 
@@ -493,8 +503,27 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
           </button>
         </div>
       )}
-      {visibleRounds.map(round => (
-        <div key={round}>
+      {(() => {
+        let lastSessionId: string | undefined;
+        return visibleRounds.map((round) => {
+          const sessionForRound = sessions.length > 1 ? getSessionForRound(round, sessions) : null;
+          const showSessionHeader = sessionForRound && sessionForRound.id !== lastSessionId && roundTab === 'active';
+          lastSessionId = sessionForRound?.id;
+
+          return (
+            <React.Fragment key={round}>
+              {showSessionHeader && (
+                <div className="flex items-center gap-3 py-1">
+                  <div className="flex items-center gap-2 rounded-full border-2 border-slate-800 bg-slate-900 px-3 py-1.5 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]">
+                    <CalendarDays className="h-3 w-3 text-lime-400" />
+                    <span className="text-[10px] font-black uppercase tracking-[0.18em] text-lime-400">
+                      {sessionForRound.name}
+                    </span>
+                  </div>
+                  <div className="h-px flex-1 bg-slate-800/20" />
+                </div>
+              )}
+              <div>
           {(() => {
             const roundMatches = matches
               .filter((match) => (
@@ -649,7 +678,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                           <User className="w-2.5 h-2.5 sm:w-4 sm:h-4" />
                         </div>
                         {winnerTeam === 1 && <Sparkles className="h-3 w-3 shrink-0 text-lime-600" />}
-                        <span className="truncate">{getPlayerName(pid)}</span>
+                        <span className="truncate">{getPlayerDisplayName(pid, match.round)}</span>
                       </div>
                     ))}
                   </div>
@@ -665,7 +694,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                       <div key={pid} className={`flex items-center justify-end gap-1.5 rounded-xl px-1.5 py-1 text-[11px] sm:text-lg font-black truncate transition-colors ${
                         winnerTeam === 2 ? 'winner-name-pop bg-orange-100 text-orange-900 ring-2 ring-orange-300' : 'text-slate-800'
                       }`}>
-                        <span className="truncate">{getPlayerName(pid)}</span>
+                        <span className="truncate">{getPlayerDisplayName(pid, match.round)}</span>
                         {winnerTeam === 2 && <Sparkles className="h-3 w-3 shrink-0 text-orange-600" />}
                         <div className={`w-4 h-4 sm:w-8 sm:h-8 rounded-md sm:rounded-lg border border-slate-800 flex items-center justify-center text-slate-800 shrink-0 ${
                           winnerTeam === 2 ? 'bg-orange-300' : 'bg-orange-100'
@@ -824,7 +853,10 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
             );
           })()}
         </div>
-      ))}
+            </React.Fragment>
+          );
+        });
+      })()}
       {matches.length === 0 && (
         <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white p-10 text-center">
           <div className="w-16 h-16 bg-lime-50 rounded-2xl flex items-center justify-center mx-auto mb-6 border-2 border-lime-100">

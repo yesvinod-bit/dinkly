@@ -38,9 +38,24 @@ export interface Tournament {
   ownerId: string;
   format?: TournamentFormat;
   pairingMode?: TournamentPairingMode;
+  leagueMode?: boolean;
   status: 'setup' | 'active' | 'completed';
   createdAt: Timestamp;
   updatedAt?: Timestamp;
+}
+
+export interface SessionAbsence {
+  subName: string | null;
+}
+
+export interface Session {
+  id: string;
+  name: string;
+  startRound: number;
+  endRound?: number;
+  status: 'active' | 'completed';
+  createdAt: Timestamp;
+  absences: Record<string, SessionAbsence>;
 }
 
 export interface Player {

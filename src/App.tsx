@@ -27,7 +27,7 @@ import {
   getTournamentFormat,
   getTournamentFormatTag
 } from './lib/tournamentLogic';
-import { Trophy, Users, Plus, Hash, LogOut, ChevronRight, History, Calendar, Bell, X, Shield, Loader2, CheckSquare, Square, Trash2, BadgeCheck, Download, Home, Activity, PlayCircle, RefreshCw, Sparkles, Shuffle, Link2, ClipboardPaste } from 'lucide-react';
+import { Trophy, Users, Plus, Hash, LogOut, ChevronRight, History, Calendar, Bell, X, Shield, Loader2, CheckSquare, Square, Trash2, BadgeCheck, Download, Home, Activity, PlayCircle, RefreshCw, Sparkles, Shuffle, Link2, ClipboardPaste, Repeat2 } from 'lucide-react';
 import { buildProfileAdvice } from './lib/profileAdvice';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -226,6 +226,7 @@ export default function App() {
   const [newTourneyName, setNewTourneyName] = useState(() => buildSuggestedTournamentName());
   const [newTournamentFormat, setNewTournamentFormat] = useState<TournamentFormat>(DEFAULT_TOURNAMENT_FORMAT);
   const [newTournamentPairingMode, setNewTournamentPairingMode] = useState<TournamentPairingMode>(DEFAULT_TOURNAMENT_PAIRING_MODE);
+  const [newLeagueMode, setNewLeagueMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -709,6 +710,7 @@ export default function App() {
         ownerId: user.uid,
         format: newTournamentFormat,
         pairingMode: newTournamentFormat === 'doubles' ? newTournamentPairingMode : DEFAULT_TOURNAMENT_PAIRING_MODE,
+        leagueMode: newTournamentFormat === 'doubles' && newTournamentPairingMode === 'fixed' ? newLeagueMode : false,
         status: 'setup',
         createdAt: serverTimestamp(),
       });
@@ -1412,6 +1414,7 @@ export default function App() {
                             onClick={(e) => {
                               e.stopPropagation();
                               setNewTournamentPairingMode('random');
+                              setNewLeagueMode(false);
                             }}
                             className={`flex min-h-9 items-center justify-center gap-1.5 rounded-lg border-2 px-2 text-[10px] font-black uppercase transition-all ${
                               newTournamentPairingMode === 'random'
@@ -1443,6 +1446,31 @@ export default function App() {
                           </button>
                         </div>
                       </div>
+                    )}
+                    {newTournamentFormat === 'doubles' && newTournamentPairingMode === 'fixed' && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setNewLeagueMode((prev) => !prev);
+                        }}
+                        className={`mb-3 flex w-full items-center gap-3 rounded-xl border-2 px-3 py-2.5 text-left transition-all ${
+                          newLeagueMode
+                            ? 'border-slate-800 bg-white shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]'
+                            : 'border-slate-300 bg-white/40 opacity-70'
+                        }`}
+                        aria-pressed={newLeagueMode}
+                      >
+                        <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border-2 border-slate-800 transition-colors ${newLeagueMode ? 'bg-lime-400' : 'bg-white'}`}>
+                          <Repeat2 className="h-3.5 w-3.5 text-slate-800" />
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-black uppercase text-slate-800">League Mode</div>
+                          <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                            Multi-session · Absence tracking · Season standings
+                          </div>
+                        </div>
+                      </button>
                     )}
                     <div className="flex flex-col sm:flex-row items-center gap-2 md:gap-3">
                       <input 

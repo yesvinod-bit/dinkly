@@ -1,45 +1,49 @@
 import React, { useState, useEffect } from 'react';
 import QRCode from 'qrcode';
-import { 
-  doc, 
-  onSnapshot, 
-  collection, 
-  query, 
-  orderBy, 
+import {
+  doc,
+  onSnapshot,
+  collection,
+  query,
+  orderBy,
   where,
-  updateDoc, 
-  addDoc, 
+  updateDoc,
+  addDoc,
   serverTimestamp,
   writeBatch,
   Timestamp
 } from 'firebase/firestore';
-import { 
-  db, 
-  auth, 
-  Tournament, 
+import {
+  db,
+  auth,
+  Tournament,
   TournamentFormat,
   TournamentPairingMode,
-  Player, 
-  Match, 
+  Player,
+  Match,
+  Session,
+  SessionAbsence,
   getReadableFirestoreError
 } from '../lib/firebase';
 import {
   buildSeededPlayoffMatches,
+  filterMatchesBySession,
   generateRoundMatches,
   getFixedPairingStatus,
   getFixedPairStandings,
   getMinimumPlayers,
+  getSittingOutPlayerIds,
   getTournamentFormat,
   getTournamentFormatTag,
   getTournamentPairingMode,
   type SeededPlayoffPair
 } from '../lib/tournamentLogic';
-import { 
-  Trophy, 
-  Users, 
-  Plus, 
-  Share2, 
-  ChevronLeft, 
+import {
+  Trophy,
+  Users,
+  Plus,
+  Share2,
+  ChevronLeft,
   RotateCcw,
   AlertTriangle,
   Loader2,
@@ -47,11 +51,13 @@ import {
   Bell,
   X,
   Copy,
-  CheckCircle2
+  CheckCircle2,
+  CalendarDays
 } from 'lucide-react';
 import Leaderboard from './Leaderboard';
 import MatchList from './MatchList';
 import PlayerManager from './PlayerManager';
+import SessionManager from './SessionManager';
 import { motion, AnimatePresence } from 'motion/react';
 import { buildJoinUrl, buildSpectatorUrl } from '../lib/appUrl';
 
@@ -113,6 +119,9 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   const [isJoinPanelOpen, setIsJoinPanelOpen] = useState(false);
   const [joinQrDataUrl, setJoinQrDataUrl] = useState('');
   const [joinLinkCopied, setJoinLinkCopied] = useState(false);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [isSessionManagerOpen, setIsSessionManagerOpen] = useState(false);
+  const [isStartingSession, setIsStartingSession] = useState(false);
 
   useEffect(() => {
     const unsubT = onSnapshot(doc(db, 'tournaments', tournamentId), (s) => {
@@ -144,7 +153,13 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
       }
     );
 
-    return () => { unsubT(); unsubP(); unsubM(); };
+    const unsubS = onSnapshot(
+      query(collection(db, 'tournaments', tournamentId, 'sessions'), orderBy('createdAt')),
+      (s) => setSessions(s.docs.map((d) => ({ id: d.id, ...d.data() } as Session))),
+      (err) => console.error('Sessions listener error:', err)
+    );
+
+    return () => { unsubT(); unsubP(); unsubM(); unsubS(); };
   }, [readOnly, tournamentId]);
 
   useEffect(() => {
@@ -184,6 +199,10 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   const gamesLeftInRound = currentRoundMatches.filter((match) => match.status === 'pending').length;
   const canCloseTournament = canManageTournament && tournament?.status === 'active' && matches.length > 0 && gamesLeftInRound === 0;
   const joinUrl = typeof window !== 'undefined' ? buildJoinUrl(window.location.origin, tournamentId) : '';
+  const isLeague = Boolean(tournament?.leagueMode);
+  const currentSession = sessions.find((s) => s.status === 'active') ?? sessions[sessions.length - 1] ?? null;
+  const currentSessionAbsences = currentSession?.absences ?? {};
+  const canStartNewSession = isLeague && canManageTournament && tournament?.status === 'active' && !playoffStarted && gamesLeftInRound === 0 && currentRound > 0;
 
   useEffect(() => {
     const currentUser = auth.currentUser;
@@ -270,14 +289,18 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
     try {
       await updateDoc(doc(db, 'tournaments', tournamentId), { status: 'active' });
       setTab('matches');
-      await generateNextRound();
+      if (isLeague) {
+        setIsSessionManagerOpen(true);
+      } else {
+        await generateNextRound();
+      }
     } catch (e) {
       const message = getReadableFirestoreError(e, 'Unable to start the tournament right now.');
       setRoundActionError(message);
     }
   };
 
-  const generateNextRound = async () => {
+  const generateNextRound = async (overrideAbsences?: Record<string, SessionAbsence>) => {
     if (!canManageTournament) return;
     setRoundActionError(null);
     setIsGeneratingRound(true);
@@ -298,17 +321,30 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
         return;
       }
 
-      const currentRound = matches.length > 0 ? Math.max(...matches.map(m => m.round)) : 0;
+      const absences = overrideAbsences ?? (isLeague ? currentSessionAbsences : {});
+      const sittingOutIds = new Set(
+        Object.keys(absences).length > 0 ? getSittingOutPlayerIds(players, absences) : []
+      );
+      const activePlayers = sittingOutIds.size > 0
+        ? players.filter((p) => !sittingOutIds.has(p.id))
+        : players;
+
+      if (activePlayers.length < minimumPlayers) {
+        setRoundActionError(`Not enough active players after absences. Need at least ${minimumPlayers}.`);
+        return;
+      }
+
+      const currentRound = matches.length > 0 ? Math.max(...matches.map((m) => m.round)) : 0;
       const nextRound = currentRound + 1;
-      const roundMatches = generateRoundMatches(players, nextRound, tournamentFormat, matches, tournamentPairingMode);
+      const roundMatches = generateRoundMatches(activePlayers, nextRound, tournamentFormat, matches, tournamentPairingMode);
 
       if (roundMatches.length === 0) {
         setRoundActionError(`No ${tournamentFormat} matches could be generated from the current roster.`);
         return;
       }
-      
+
       const batch = writeBatch(db);
-      roundMatches.forEach(m => {
+      roundMatches.forEach((m) => {
         const ref = doc(collection(db, 'tournaments', tournamentId, 'matches'));
         batch.set(ref, {
           ...m,
@@ -328,6 +364,38 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
       setRoundActionError(message);
     } finally {
       setIsGeneratingRound(false);
+    }
+  };
+
+  const startNewSession = async (name: string, absences: Record<string, SessionAbsence>) => {
+    if (!canManageTournament) return;
+    setIsStartingSession(true);
+    setRoundActionError(null);
+
+    try {
+      if (currentSession?.status === 'active') {
+        await updateDoc(doc(db, 'tournaments', tournamentId, 'sessions', currentSession.id), {
+          status: 'completed',
+          endRound: currentRound,
+        });
+      }
+
+      await addDoc(collection(db, 'tournaments', tournamentId, 'sessions'), {
+        name,
+        startRound: currentRound + 1,
+        status: 'active',
+        absences,
+        createdAt: serverTimestamp(),
+      });
+
+      await generateNextRound(absences);
+      setIsSessionManagerOpen(false);
+    } catch (e) {
+      console.error('Session start failed:', e);
+      const message = getReadableFirestoreError(e, 'Unable to start the session right now.');
+      setRoundActionError(message);
+    } finally {
+      setIsStartingSession(false);
     }
   };
 
@@ -710,6 +778,18 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {isSessionManagerOpen && (
+          <SessionManager
+            players={players}
+            sessionNumber={sessions.length + 1}
+            isCreating={isStartingSession}
+            onConfirm={startNewSession}
+            onCancel={() => setIsSessionManagerOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
       <nav className="bg-white border-b-2 md:border-b-4 border-slate-800 px-2 md:px-4 overflow-x-auto no-scrollbar">
         <div className="max-w-4xl mx-auto flex min-w-max">
           <TabButton active={tab === 'matches'} onClick={() => setTab('matches')} icon={<RotateCcw className="w-3.5 h-3.5 md:w-4 md:h-4" />} label="GAMES" />
@@ -724,14 +804,15 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
         <AnimatePresence mode="wait">
           {tab === 'setup' && (
             <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
-              <PlayerManager 
-                tournamentId={tournamentId} 
-                players={players} 
+              <PlayerManager
+                tournamentId={tournamentId}
+                players={players}
                 format={tournamentFormat}
                 pairingMode={tournamentPairingMode}
                 canAddPlayers={canContributePlayers}
                 isOwner={canManageTournament}
                 status={tournament?.status || 'setup'}
+                isLeague={isLeague}
                 onStart={startTournament}
               />
             </motion.div>
@@ -753,14 +834,26 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                       </span>
                     </button>
                   )}
-                  {canManageTournament && tournament?.status === 'active' && !playoffStarted && (
-                    <button 
-                      onClick={generateNextRound}
+                  {canStartNewSession && (
+                    <button
+                      onClick={() => setIsSessionManagerOpen(true)}
+                      disabled={isGeneratingRound || isStartingSession}
+                      className="rounded-2xl border-2 border-slate-800 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <CalendarDays className="h-3.5 w-3.5" />
+                        New Session
+                      </span>
+                    </button>
+                  )}
+                  {canManageTournament && tournament?.status === 'active' && !playoffStarted && (!isLeague || sessions.length > 0) && (
+                    <button
+                      onClick={() => generateNextRound()}
                       disabled={isGeneratingRound}
                       className="brutal-button-lime py-2 px-3 md:py-3 md:px-6"
                     >
                       <div className="flex items-center gap-1.5 md:gap-2">
-                        {isGeneratingRound ? <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Plus className="w-4 h-4 md:w-5 md:h-5" />} 
+                        {isGeneratingRound ? <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" /> : <Plus className="w-4 h-4 md:w-5 md:h-5" />}
                         <span className="text-xs sm:text-sm">{isGeneratingRound ? 'BUILDING ROUND...' : 'NEXT ROUND'}</span>
                       </div>
                     </button>
@@ -773,15 +866,17 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                   <span>{roundActionError}</span>
                 </div>
               )}
-              <MatchList 
-                tournamentId={tournamentId} 
+              <MatchList
+                tournamentId={tournamentId}
                 tournamentName={tournament?.name || ''}
                 format={tournamentFormat}
-                matches={matches} 
-                players={players} 
+                matches={matches}
+                players={players}
                 isOwner={isOwner}
                 canEnterScores={canEnterScores}
                 readOnly={readOnly}
+                sessions={sessions}
+                sessionAbsences={currentSessionAbsences}
               />
             </motion.div>
           )}
@@ -798,6 +893,8 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                 playoffActionError={playoffActionError}
                 onCreatePlayoffRound={createInitialPlayoffRound}
                 onCreateNextPlayoffRound={createNextPlayoffRound}
+                sessions={sessions}
+                currentSession={currentSession}
               />
             </motion.div>
           )}
