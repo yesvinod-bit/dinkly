@@ -57,7 +57,7 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
     setError(null);
     try {
       await addDoc(collection(db, 'tournaments', tournamentId, 'players'), {
-        name,
+        name: name.trim(),
         points: 0,
         gamesPlayed: 0,
         wins: 0,

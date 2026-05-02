@@ -2,7 +2,7 @@
 
 ## April 28, 2026
 
-- 🎯 Added fixed-pair doubles mode so organizers can lock teams before kickoff.
+- 🎯 Added fixed-pair doubles mode so organizers can choose or change pairing before kickoff.
 - 🧩 Added pair-based standings for fixed-pair tournaments, while singles and random pairing keep their existing flow.
 - 🏆 Added fixed-pair playoffs from Rankings with seeded matchups, pair selection, and manual next-round creation.
 - 🧊 Preliminary standings now freeze once playoffs begin, with separate playoff standings for knockout play.

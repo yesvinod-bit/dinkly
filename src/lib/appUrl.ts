@@ -40,3 +40,9 @@ export function buildSpectatorUrl(origin: string, tournamentId: string) {
   url.searchParams.set('view', tournamentId);
   return url.toString();
 }
+
+export function buildJoinUrl(origin: string, tournamentId: string) {
+  const url = new URL(getPublicAppOrigin(origin));
+  url.searchParams.set('join', tournamentId);
+  return url.toString();
+}

@@ -27,7 +27,7 @@ import {
   getTournamentFormat,
   getTournamentFormatTag
 } from './lib/tournamentLogic';
-import { Trophy, Users, Plus, Hash, LogOut, ChevronRight, History, Calendar, Bell, X, Shield, Loader2, CheckSquare, Square, Trash2, BadgeCheck, Download, Home, Activity, PlayCircle, RefreshCw, Sparkles, Shuffle, Link2 } from 'lucide-react';
+import { Trophy, Users, Plus, Hash, LogOut, ChevronRight, History, Calendar, Bell, X, Shield, Loader2, CheckSquare, Square, Trash2, BadgeCheck, Download, Home, Activity, PlayCircle, RefreshCw, Sparkles, Shuffle, Link2, ClipboardPaste } from 'lucide-react';
 import { buildProfileAdvice } from './lib/profileAdvice';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -140,6 +140,43 @@ interface BeforeInstallPromptEvent extends Event {
 const LOGIN_SESSION_PREFIX = 'dinkly:login-recorded:';
 const PROFILE_ADVICE_REFRESH_MS = 20_000;
 
+const tournamentNameOpeners = [
+  'Dink & Dash',
+  'Kitchen Chaos',
+  'Paddle Party',
+  'Net Results',
+  'Court Jesters',
+  'Drop Shot Social',
+  'Rally Club',
+  'Pickle Panic',
+  'Third Shot Throwdown',
+  'Lob Mob',
+  'Dink Dynasty',
+  'No Volley Zone',
+];
+
+function buildSuggestedTournamentName(date = new Date()) {
+  const dateLabel = date.toLocaleDateString([], {
+    month: 'short',
+    day: 'numeric',
+  });
+  const opener = tournamentNameOpeners[Math.floor(Math.random() * tournamentNameOpeners.length)];
+  return `${dateLabel} ${opener}`;
+}
+
+function getSharedTournamentIdFromInput(value: string) {
+  try {
+    const url = new URL(value.trim());
+    return url.searchParams.get('join') || url.searchParams.get('view');
+  } catch {
+    return null;
+  }
+}
+
+function normalizeTournamentCodeInput(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+}
+
 function isRunningStandalone(): boolean {
   return window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
 }
@@ -186,7 +223,7 @@ export default function App() {
   const [activeTournamentId, setActiveTournamentId] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [joinCode, setJoinCode] = useState('');
-  const [newTourneyName, setNewTourneyName] = useState('');
+  const [newTourneyName, setNewTourneyName] = useState(() => buildSuggestedTournamentName());
   const [newTournamentFormat, setNewTournamentFormat] = useState<TournamentFormat>(DEFAULT_TOURNAMENT_FORMAT);
   const [newTournamentPairingMode, setNewTournamentPairingMode] = useState<TournamentPairingMode>(DEFAULT_TOURNAMENT_PAIRING_MODE);
   const [error, setError] = useState<string | null>(null);
@@ -194,6 +231,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<LoginEvent[]>([]);
   const [sharedTournamentId, setSharedTournamentId] = useState<string | null>(null);
+  const [sharedTournamentRequiresSignIn, setSharedTournamentRequiresSignIn] = useState(false);
   const [isHistorySelectionMode, setIsHistorySelectionMode] = useState(false);
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([]);
   const [isClearingHistory, setIsClearingHistory] = useState(false);
@@ -399,9 +437,11 @@ export default function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const viewParam = params.get('view');
-    if (viewParam) {
-      setSharedTournamentId(viewParam);
+    const joinParam = params.get('join');
+    const sharedParam = joinParam || params.get('view');
+    if (sharedParam) {
+      setSharedTournamentId(sharedParam);
+      setSharedTournamentRequiresSignIn(Boolean(joinParam));
     }
 
     return onAuthStateChanged(auth, async (u) => {
@@ -658,12 +698,13 @@ export default function App() {
   };
 
   const createTournament = async () => {
-    if (!user || !newTourneyName.trim()) return;
+    if (!user) return;
     setLoading(true);
     try {
       const code = generateCode();
+      const tournamentName = newTourneyName.trim() || buildSuggestedTournamentName();
       const docRef = await addDoc(collection(db, 'tournaments'), {
-        name: newTourneyName,
+        name: tournamentName,
         code,
         ownerId: user.uid,
         format: newTournamentFormat,
@@ -671,7 +712,7 @@ export default function App() {
         status: 'setup',
         createdAt: serverTimestamp(),
       });
-      await recordTournamentJoin(docRef.id, newTourneyName, code, 'owner', newTournamentFormat);
+      await recordTournamentJoin(docRef.id, tournamentName, code, 'owner', newTournamentFormat);
       setActiveTournamentId(docRef.id);
     } catch (e) {
       handleFirestoreError(e, 'create', 'tournaments');
@@ -718,7 +759,22 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const q = query(collection(db, 'tournaments'), where('code', '==', joinCode.toUpperCase()));
+      const sharedTournamentIdFromInput = getSharedTournamentIdFromInput(joinCode);
+      if (sharedTournamentIdFromInput) {
+        setSharedTournamentId(sharedTournamentIdFromInput);
+        setSharedTournamentRequiresSignIn(true);
+        setLoading(false);
+        return;
+      }
+
+      const normalizedCode = normalizeTournamentCodeInput(joinCode);
+      if (normalizedCode.length !== 6) {
+        setError('Enter a 6-character code or paste an invite link');
+        setLoading(false);
+        return;
+      }
+
+      const q = query(collection(db, 'tournaments'), where('code', '==', normalizedCode));
       const snap = await getDocs(q);
       if (snap.empty) {
         setError('Tournament not found');
@@ -741,6 +797,17 @@ export default function App() {
     }
   };
 
+  const pasteJoinCode = async () => {
+    if (!navigator.clipboard?.readText) return;
+    try {
+      const text = await navigator.clipboard.readText();
+      const sharedTournamentIdFromInput = getSharedTournamentIdFromInput(text);
+      setJoinCode(sharedTournamentIdFromInput ? text : normalizeTournamentCodeInput(text));
+    } catch (error) {
+      console.warn('Unable to read clipboard:', error);
+    }
+  };
+
   const handleSignIn = async () => {
     setAuthError(null);
     try {
@@ -751,7 +818,7 @@ export default function App() {
     }
   };
 
-  if (sharedTournamentId && !user) {
+  if (sharedTournamentId && !user && !sharedTournamentRequiresSignIn) {
     return (
       <Suspense fallback={<LoadingOverlay />}>
         <TournamentDashboard 
@@ -759,6 +826,7 @@ export default function App() {
           readOnly={true}
           onBack={() => {
             setSharedTournamentId(null);
+            setSharedTournamentRequiresSignIn(false);
             const newUrl = window.location.pathname;
             window.history.replaceState({}, '', newUrl);
           }} 
@@ -857,6 +925,7 @@ export default function App() {
           readOnly={false}
           onBack={() => {
             setSharedTournamentId(null);
+            setSharedTournamentRequiresSignIn(false);
             const newUrl = window.location.pathname;
             window.history.replaceState({}, '', newUrl);
           }}
@@ -1380,10 +1449,21 @@ export default function App() {
                         type="text" 
                         value={newTourneyName}
                         onChange={(e) => setNewTourneyName(e.target.value)}
-                        placeholder="Sat Night Mixer"
+                        placeholder={buildSuggestedTournamentName()}
                         onClick={(e) => e.stopPropagation()}
                         className="brutal-input w-full text-sm md:text-base"
                       />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setNewTourneyName(buildSuggestedTournamentName());
+                        }}
+                        className="flex min-h-12 w-full items-center justify-center rounded-xl border-2 border-slate-800 bg-white px-3 text-[10px] font-black uppercase text-slate-700 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] sm:w-auto"
+                        title="Suggest a new name"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                      </button>
                       <button 
                         onClick={(e) => { e.stopPropagation(); createTournament(); }}
                         className="w-full sm:w-auto brutal-button-orange text-sm"
@@ -1408,12 +1488,27 @@ export default function App() {
                     <div className="flex flex-col sm:flex-row gap-2 md:gap-3">
                       <input 
                         type="text" 
-                        maxLength={6}
+                        inputMode="text"
+                        autoComplete="one-time-code"
                         value={joinCode}
-                        onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                        placeholder="CODE12"
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setJoinCode(getSharedTournamentIdFromInput(value) ? value : normalizeTournamentCodeInput(value));
+                        }}
+                        onKeyDown={(e) => e.key === 'Enter' && joinByCode()}
+                        placeholder="CODE12 or paste link"
                         className="brutal-input flex-1 font-mono tracking-widest text-lg md:text-2xl uppercase text-center sm:text-left"
                       />
+                      {typeof navigator !== 'undefined' && Boolean(navigator.clipboard?.readText) && (
+                        <button
+                          type="button"
+                          onClick={pasteJoinCode}
+                          className="flex min-h-12 items-center justify-center rounded-xl border-2 border-slate-800 bg-white px-4 text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
+                          title="Paste Code or Link"
+                        >
+                          <ClipboardPaste className="h-5 w-5" />
+                        </button>
+                      )}
                       <button 
                         onClick={joinByCode}
                         className="brutal-button-lime px-6 md:px-8 text-sm md:text-xl"
@@ -1421,6 +1516,9 @@ export default function App() {
                         JOIN
                       </button>
                     </div>
+                    <p className="mt-3 text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+                      Spaces, dashes, and shared links work too.
+                    </p>
                     {error && (
                       <div className="mt-4 bg-orange-50 border-2 border-orange-200 text-orange-600 px-4 py-2 rounded-xl font-bold text-sm uppercase">
                         {error}

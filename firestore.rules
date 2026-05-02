@@ -378,6 +378,15 @@ service cloud.firestore {
                  data.updatedAt is timestamp;
         }
 
+        function isParticipantScoreUpdate() {
+          return tournamentStatus(tournamentId) == 'active' &&
+                 isTournamentMember(tournamentId) &&
+                 isValidMatchDocument(incoming()) &&
+                 existing().status in ['pending', 'completed'] &&
+                 incoming().status == 'completed' &&
+                 incoming().diff(existing()).affectedKeys().hasOnly(['score1', 'score2', 'status', 'updatedAt', 'completedAt']);
+        }
+
         allow read: if true;
         allow create: if isValidId(tournamentId) &&
                       isValidId(matchId) &&
@@ -388,6 +397,89 @@ service cloud.firestore {
                       isValidId(matchId) &&
                       tournamentExists(tournamentId) &&
                       isOwner(tournamentId);
+        allow update: if isValidId(tournamentId) &&
+                      isValidId(matchId) &&
+                      tournamentExists(tournamentId) &&
+                      isParticipantScoreUpdate();
+      }
+
+      match /scoreNotifications/{notificationId} {
+        function isValidScoreNotification(data) {
+          return data.keys().hasAll([
+                   'matchId',
+                   'tournamentName',
+                   'round',
+                   'roundLabel',
+                   'team1Label',
+                   'team2Label',
+                   'score1',
+                   'score2',
+                   'previousScore1',
+                   'previousScore2',
+                   'action',
+                   'actorUserId',
+                   'actorDisplayName',
+                   'recipientUserIds',
+                   'createdAt'
+                 ]) &&
+                 data.keys().hasOnly([
+                   'matchId',
+                   'tournamentName',
+                   'round',
+                   'roundLabel',
+                   'team1Label',
+                   'team2Label',
+                   'score1',
+                   'score2',
+                   'previousScore1',
+                   'previousScore2',
+                   'action',
+                   'actorUserId',
+                   'actorDisplayName',
+                   'recipientUserIds',
+                   'createdAt'
+                 ]) &&
+                 data.matchId is string &&
+                 data.matchId.size() > 0 &&
+                 data.matchId.size() <= 128 &&
+                 data.tournamentName is string &&
+                 data.tournamentName.size() <= 100 &&
+                 data.round is number &&
+                 data.round >= 1 &&
+                 data.roundLabel is string &&
+                 data.roundLabel.size() > 0 &&
+                 data.roundLabel.size() <= 80 &&
+                 data.team1Label is string &&
+                 data.team1Label.size() > 0 &&
+                 data.team1Label.size() <= 160 &&
+                 data.team2Label is string &&
+                 data.team2Label.size() > 0 &&
+                 data.team2Label.size() <= 160 &&
+                 data.score1 is number &&
+                 data.score1 >= 0 &&
+                 data.score2 is number &&
+                 data.score2 >= 0 &&
+                 data.score1 != data.score2 &&
+                 (data.previousScore1 == null || (data.previousScore1 is number && data.previousScore1 >= 0)) &&
+                 (data.previousScore2 == null || (data.previousScore2 is number && data.previousScore2 >= 0)) &&
+                 data.action in ['entered', 'modified'] &&
+                 (data.actorUserId == null || data.actorUserId == request.auth.uid) &&
+                 data.actorDisplayName is string &&
+                 data.actorDisplayName.size() > 0 &&
+                 data.actorDisplayName.size() <= 120 &&
+                 data.recipientUserIds is list &&
+                 data.recipientUserIds.size() > 0 &&
+                 data.recipientUserIds.size() <= 80 &&
+                 data.createdAt is timestamp;
+        }
+
+        allow get, list: if isRegisteredUser() &&
+                         resource.data.recipientUserIds.hasAny([request.auth.uid]);
+        allow create: if isValidId(tournamentId) &&
+                      isValidId(notificationId) &&
+                      tournamentExists(tournamentId) &&
+                      (isOwner(tournamentId) || isTournamentMember(tournamentId)) &&
+                      isValidScoreNotification(incoming());
       }
     }
 

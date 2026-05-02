@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
+import QRCode from 'qrcode';
 import { 
   doc, 
   onSnapshot, 
   collection, 
   query, 
   orderBy, 
+  where,
   updateDoc, 
   addDoc, 
   serverTimestamp,
-  writeBatch
+  writeBatch,
+  Timestamp
 } from 'firebase/firestore';
 import { 
   db, 
@@ -40,18 +43,41 @@ import {
   RotateCcw,
   AlertTriangle,
   Loader2,
-  Flag
+  Flag,
+  Bell,
+  X,
+  Copy,
+  CheckCircle2
 } from 'lucide-react';
 import Leaderboard from './Leaderboard';
 import MatchList from './MatchList';
 import PlayerManager from './PlayerManager';
 import { motion, AnimatePresence } from 'motion/react';
-import { buildSpectatorUrl, getPublicAppUrl } from '../lib/appUrl';
+import { buildJoinUrl, buildSpectatorUrl } from '../lib/appUrl';
 
 interface Props {
   tournamentId: string;
   readOnly?: boolean;
   onBack: () => void;
+}
+
+interface ScoreNotification {
+  id: string;
+  matchId: string;
+  tournamentName: string;
+  round: number;
+  roundLabel?: string;
+  team1Label: string;
+  team2Label: string;
+  score1: number;
+  score2: number;
+  previousScore1?: number | null;
+  previousScore2?: number | null;
+  action: 'entered' | 'modified';
+  actorUserId?: string | null;
+  actorDisplayName?: string;
+  recipientUserIds: string[];
+  createdAt?: Timestamp;
 }
 
 function TournamentStatusPill({ status, readOnly }: { status?: Tournament['status']; readOnly: boolean }) {
@@ -83,6 +109,10 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   const [isGeneratingRound, setIsGeneratingRound] = useState(false);
   const [isCreatingPlayoffRound, setIsCreatingPlayoffRound] = useState(false);
   const [isTournamentMember, setIsTournamentMember] = useState(false);
+  const [scoreNotifications, setScoreNotifications] = useState<ScoreNotification[]>([]);
+  const [isJoinPanelOpen, setIsJoinPanelOpen] = useState(false);
+  const [joinQrDataUrl, setJoinQrDataUrl] = useState('');
+  const [joinLinkCopied, setJoinLinkCopied] = useState(false);
 
   useEffect(() => {
     const unsubT = onSnapshot(doc(db, 'tournaments', tournamentId), (s) => {
@@ -137,7 +167,10 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   }, [readOnly, tournamentId, tournament?.ownerId]);
 
   const isOwner = tournament?.ownerId === auth.currentUser?.uid;
+  const currentUserId = auth.currentUser?.uid;
+  const hasClaimedPlayer = Boolean(currentUserId && players.some((player) => player.claimedByUserId === currentUserId));
   const canManageTournament = isOwner && !readOnly;
+  const canEnterScores = !readOnly && (isOwner || hasClaimedPlayer);
   const canContributePlayers = !readOnly && (isOwner || isTournamentMember);
   const showSetupTab = !readOnly && (isOwner || isTournamentMember);
   const tournamentFormat: TournamentFormat = getTournamentFormat(tournament?.format);
@@ -150,6 +183,78 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   const currentRoundMatches = matches.filter((match) => match.round === currentRound && match.status !== 'void');
   const gamesLeftInRound = currentRoundMatches.filter((match) => match.status === 'pending').length;
   const canCloseTournament = canManageTournament && tournament?.status === 'active' && matches.length > 0 && gamesLeftInRound === 0;
+  const joinUrl = typeof window !== 'undefined' ? buildJoinUrl(window.location.origin, tournamentId) : '';
+
+  useEffect(() => {
+    const currentUser = auth.currentUser;
+    if (!currentUser || readOnly || !hasClaimedPlayer) {
+      setScoreNotifications([]);
+      return;
+    }
+
+    let didLoadInitialSnapshot = false;
+    const notificationsQuery = query(
+      collection(db, 'tournaments', tournamentId, 'scoreNotifications'),
+      where('recipientUserIds', 'array-contains', currentUser.uid)
+    );
+
+    return onSnapshot(notificationsQuery, (snapshot) => {
+      if (!didLoadInitialSnapshot) {
+        didLoadInitialSnapshot = true;
+        return;
+      }
+
+      snapshot.docChanges().forEach((change) => {
+        if (change.type !== 'added') return;
+
+        const notification = { id: change.doc.id, ...change.doc.data() } as ScoreNotification;
+        if (notification.actorUserId === currentUser.uid) return;
+
+        setScoreNotifications((prev) => [notification, ...prev].slice(0, 3));
+        window.setTimeout(() => {
+          setScoreNotifications((prev) => prev.filter((item) => item.id !== notification.id));
+        }, 6500);
+
+        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+          const scoreLine = `${notification.team1Label} ${notification.score1}-${notification.score2} ${notification.team2Label}`;
+          new Notification(`${notification.tournamentName || 'Dinkly'} score ${notification.action}`, {
+            body: `${notification.roundLabel || `RD ${notification.round}`}: ${scoreLine}`,
+            tag: `dinkly-score-${tournamentId}-${notification.matchId}`,
+            icon: '/icons/icon-192.png',
+          });
+        }
+      });
+    }, (err) => {
+      console.error('Score notification listener error:', err);
+    });
+  }, [hasClaimedPlayer, readOnly, tournamentId]);
+
+  useEffect(() => {
+    if (!isJoinPanelOpen || !joinUrl) return;
+
+    let cancelled = false;
+    void QRCode.toDataURL(joinUrl, {
+      margin: 1,
+      width: 224,
+      color: {
+        dark: '#0f172a',
+        light: '#ffffff',
+      },
+    }).then((dataUrl) => {
+      if (!cancelled) {
+        setJoinQrDataUrl(dataUrl);
+      }
+    }).catch((error) => {
+      console.error('QR generation failed:', error);
+      if (!cancelled) {
+        setJoinQrDataUrl('');
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isJoinPanelOpen, joinUrl]);
 
   const startTournament = async () => {
     if (!canManageTournament) return;
@@ -420,18 +525,25 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
     }
   };
 
-  const shareCode = () => {
-    const url = getPublicAppUrl(window.location.href);
-
+  const shareJoinLink = async () => {
     if (navigator.share) {
-      navigator.share({
+      await navigator.share({
         title: '🏓 Let\'s play Pickleball on Dinkly!',
-        text: `Ready to dink? Join my random tournament "${tournament?.name}" on Dinkly! We use this app to manage pairings and track live scores in real-time. 🔥\n\nAccess Code: ${tournament?.code}`,
-        url: url
+        text: `Ready to dink? Join "${tournament?.name}" on Dinkly. This link opens the tournament directly, so you can claim your player and track scores. 🔥`,
+        url: joinUrl
       });
     } else {
-      navigator.clipboard.writeText(url);
-      alert('Link copied!');
+      await copyJoinLink();
+    }
+  };
+
+  const copyJoinLink = async () => {
+    try {
+      await navigator.clipboard.writeText(joinUrl);
+      setJoinLinkCopied(true);
+      window.setTimeout(() => setJoinLinkCopied(false), 1800);
+    } catch {
+      alert(joinUrl);
     }
   };
 
@@ -439,6 +551,45 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
 
   return (
     <div className="min-h-screen bg-lime-50 flex flex-col">
+      <div className="pointer-events-none fixed right-3 top-3 z-[220] flex w-[min(360px,calc(100vw-24px))] flex-col gap-2">
+        <AnimatePresence>
+          {scoreNotifications.map((notification) => (
+            <motion.div
+              key={notification.id}
+              initial={{ opacity: 0, x: 80, scale: 0.92 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 40, scale: 0.9, transition: { duration: 0.18 } }}
+              className="pointer-events-auto rounded-2xl border-2 border-slate-800 bg-white p-3 shadow-[4px_4px_0px_0px_rgba(30,41,59,1)]"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-slate-800 bg-lime-400">
+                  <Bell className="h-5 w-5 text-slate-900" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10px] font-black uppercase tracking-[0.18em] text-lime-700">
+                    Score {notification.action}
+                  </div>
+                  <div className="mt-1 truncate text-sm font-black uppercase text-slate-900">
+                    {notification.team1Label} {notification.score1}-{notification.score2} {notification.team2Label}
+                  </div>
+                  <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                    {notification.roundLabel || `RD ${notification.round}`}
+                    {notification.actorDisplayName ? ` by ${notification.actorDisplayName}` : ''}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setScoreNotifications((prev) => prev.filter((item) => item.id !== notification.id))}
+                  className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                  title="Dismiss"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
       <header className="bg-white border-b-4 border-slate-800 p-4 sticky top-0 z-50">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -462,13 +613,102 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
             </div>
           </div>
           <button 
-            onClick={shareCode} 
+            onClick={() => setIsJoinPanelOpen(true)}
             className="p-2 md:p-3 bg-orange-500 text-white rounded-xl md:rounded-2xl border-2 border-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] md:shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 transition-all"
+            title="Invite Players"
           >
             <Share2 className="w-4 h-4 md:w-5 md:h-5" />
           </button>
         </div>
       </header>
+
+      <AnimatePresence>
+        {isJoinPanelOpen && (
+          <motion.div
+            className="fixed inset-0 z-[260] flex items-end justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:items-center"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsJoinPanelOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.96 }}
+              transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+              onClick={(event) => event.stopPropagation()}
+              className="w-full max-w-sm rounded-3xl border-4 border-slate-900 bg-white p-4 shadow-[8px_8px_0px_0px_rgba(30,41,59,1)]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.22em] text-lime-700">
+                    Join Tournament
+                  </div>
+                  <h2 className="mt-1 text-xl font-black uppercase leading-tight text-slate-900">
+                    {tournament?.name}
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsJoinPanelOpen(false)}
+                  className="rounded-xl border-2 border-slate-800 bg-white p-2 text-slate-500 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:text-slate-900"
+                  title="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-4 rounded-2xl border-2 border-slate-800 bg-lime-50 p-3">
+                <div className="flex items-center justify-center rounded-xl border-2 border-slate-800 bg-white p-3">
+                  {joinQrDataUrl ? (
+                    <img src={joinQrDataUrl} alt="Join tournament QR code" className="h-48 w-48" />
+                  ) : (
+                    <div className="flex h-48 w-48 items-center justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-lime-600" />
+                    </div>
+                  )}
+                </div>
+                <p className="mt-3 text-center text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                  Scan or share. No code typing.
+                </p>
+              </div>
+
+              <div className="mt-4 rounded-2xl border-2 border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="truncate font-mono text-[11px] font-bold text-slate-600">
+                  {joinUrl}
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={copyJoinLink}
+                  className="min-h-12 rounded-xl border-2 border-slate-800 bg-white px-3 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
+                >
+                  <span className="inline-flex items-center justify-center gap-2">
+                    {joinLinkCopied ? <CheckCircle2 className="h-4 w-4 text-lime-600" /> : <Copy className="h-4 w-4" />}
+                    {joinLinkCopied ? 'Copied' : 'Copy'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={shareJoinLink}
+                  className="min-h-12 rounded-xl border-2 border-slate-800 bg-orange-500 px-3 text-[10px] font-black uppercase text-white shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
+                >
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Share2 className="h-4 w-4" />
+                    Share
+                  </span>
+                </button>
+              </div>
+
+              <div className="mt-3 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-center text-[10px] font-black uppercase tracking-[0.12em] text-orange-700">
+                Backup code: <span className="font-mono">{tournament?.code}</span>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <nav className="bg-white border-b-2 md:border-b-4 border-slate-800 px-2 md:px-4 overflow-x-auto no-scrollbar">
         <div className="max-w-4xl mx-auto flex min-w-max">
@@ -540,6 +780,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                 matches={matches} 
                 players={players} 
                 isOwner={isOwner}
+                canEnterScores={canEnterScores}
                 readOnly={readOnly}
               />
             </motion.div>

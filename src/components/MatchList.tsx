@@ -2,13 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { 
   doc, 
   collection,
-  updateDoc, 
   serverTimestamp, 
   writeBatch,
-  increment,
   Timestamp
 } from 'firebase/firestore';
-import { db, Player, Match, TournamentFormat, getReadableFirestoreError, handleFirestoreError } from '../lib/firebase';
+import { db, auth, Player, Match, TournamentFormat, getReadableFirestoreError, handleFirestoreError } from '../lib/firebase';
 import { getTournamentFormat } from '../lib/tournamentLogic';
 import { CheckCircle2, ChevronRight, User, Swords, Share2, RotateCcw, Clock3, Pencil, PartyPopper, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -20,6 +18,7 @@ interface Props {
   matches: Match[];
   players: Player[];
   isOwner: boolean;
+  canEnterScores?: boolean;
   readOnly?: boolean;
 }
 
@@ -100,7 +99,7 @@ function ScoreCelebrationOverlay({ celebration }: { celebration: ScoreCelebratio
   );
 }
 
-export default function MatchList({ tournamentId, tournamentName, format, matches, players, isOwner, readOnly = false }: Props) {
+export default function MatchList({ tournamentId, tournamentName, format, matches, players, isOwner, canEnterScores = false, readOnly = false }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [score1, setScore1] = useState<string>('');
   const [score2, setScore2] = useState<string>('');
@@ -110,7 +109,8 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
   const [showOlderRounds, setShowOlderRounds] = useState(false);
   const [celebration, setCelebration] = useState<ScoreCelebration | null>(null);
   const tournamentFormat = getTournamentFormat(format);
-  const canEditScores = isOwner && !readOnly;
+  const canEditScores = canEnterScores && !readOnly;
+  const canManageGameActions = isOwner && !readOnly;
   const playoffStarted = matches.some((match) => match.stage === 'playoff');
 
   const getPlayerName = (id: string) => players.find(p => p.id === id)?.name || 'Unknown';
@@ -191,38 +191,8 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
     });
   };
 
-  const applyCompletedMatchDelta = (
-    batch: ReturnType<typeof writeBatch>,
-    match: Match,
-    direction: 1 | -1
-  ) => {
-    const diff = Math.abs(match.score1 - match.score2);
-    if (diff === 0) return;
-
-    const winTeam = match.score1 > match.score2 ? 1 : 2;
-    const winPlayers = winTeam === 1 ? match.team1 : match.team2;
-    const losePlayers = winTeam === 1 ? match.team2 : match.team1;
-
-    winPlayers.forEach((pid) => {
-      const pRef = doc(db, 'tournaments', tournamentId, 'players', pid);
-      batch.update(pRef, {
-        points: increment(diff * direction),
-        gamesPlayed: increment(direction),
-        wins: increment(direction),
-      });
-    });
-
-    losePlayers.forEach((pid) => {
-      const pRef = doc(db, 'tournaments', tournamentId, 'players', pid);
-      batch.update(pRef, {
-        points: increment(-diff * direction),
-        gamesPlayed: increment(direction),
-      });
-    });
-  };
-
   const repeatMatch = async (match: Match) => {
-    if (!canEditScores) return;
+    if (!canManageGameActions) return;
     setActionError(null);
     setBusyMatchId(match.id);
 
@@ -269,7 +239,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
   };
 
   const voidMatch = async (match: Match) => {
-    if (!canEditScores) return;
+    if (!canManageGameActions) return;
     if (isFrozenPreliminaryMatch(match)) {
       setActionError('Preliminary games are frozen after playoffs begin.');
       return;
@@ -280,10 +250,6 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
 
     try {
       const batch = writeBatch(db);
-
-      if (match.status === 'completed') {
-        applyCompletedMatchDelta(batch, match, -1);
-      }
 
       const matchRef = doc(db, 'tournaments', tournamentId, 'matches', match.id);
       batch.update(matchRef, {
@@ -312,7 +278,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
   };
 
   const unvoidMatch = async (match: Match) => {
-    if (!canEditScores) return;
+    if (!canManageGameActions) return;
     if (isFrozenPreliminaryMatch(match)) {
       setActionError('Preliminary games are frozen after playoffs begin.');
       return;
@@ -329,15 +295,6 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
       const restoredCompletedAt = match.statusBeforeVoid === 'completed'
         ? (match.previousCompletedAt ?? serverTimestamp())
         : null;
-
-      if (match.statusBeforeVoid === 'completed') {
-        applyCompletedMatchDelta(batch, {
-          ...match,
-          status: 'completed',
-          score1: restoredScore1,
-          score2: restoredScore2,
-        }, 1);
-      }
 
       const matchRef = doc(db, 'tournaments', tournamentId, 'matches', match.id);
       batch.update(matchRef, {
@@ -394,10 +351,6 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
       const batch = writeBatch(db);
       const matchRef = doc(db, 'tournaments', tournamentId, 'matches', match.id);
 
-      if (match.status === 'completed') {
-        applyCompletedMatchDelta(batch, match, -1);
-      }
-
       batch.update(matchRef, {
         score1: s1,
         score2: s2,
@@ -406,12 +359,33 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
         completedAt: serverTimestamp()
       });
 
-      applyCompletedMatchDelta(batch, {
-        ...match,
-        score1: s1,
-        score2: s2,
-        status: 'completed',
-      }, 1);
+      const claimedRecipientIds = Array.from(new Set(
+        players
+          .map((player) => player.claimedByUserId)
+          .filter((uid): uid is string => Boolean(uid))
+      ));
+
+      if (claimedRecipientIds.length > 0) {
+        const currentUser = auth.currentUser;
+        const notificationRef = doc(collection(db, 'tournaments', tournamentId, 'scoreNotifications'));
+        batch.set(notificationRef, {
+          matchId: match.id,
+          tournamentName,
+          round: match.round,
+          roundLabel: match.roundLabel || `RD ${match.round}`,
+          team1Label: match.team1.map(getPlayerName).join(' & '),
+          team2Label: match.team2.map(getPlayerName).join(' & '),
+          score1: s1,
+          score2: s2,
+          previousScore1: match.status === 'completed' ? match.score1 : null,
+          previousScore2: match.status === 'completed' ? match.score2 : null,
+          action: match.status === 'completed' ? 'modified' : 'entered',
+          actorUserId: currentUser?.uid || null,
+          actorDisplayName: currentUser?.displayName || currentUser?.email || 'A player',
+          recipientUserIds: claimedRecipientIds,
+          createdAt: serverTimestamp(),
+        });
+      }
 
       await batch.commit();
       const winnerTeam = s1 > s2 ? 1 : 2;
@@ -434,7 +408,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
   };
 
   const undoScore = async (match: Match) => {
-    if (!canEditScores) return;
+    if (!canManageGameActions) return;
     if (isFrozenPreliminaryMatch(match)) {
       setActionError('Preliminary games are frozen after playoffs begin.');
       return;
@@ -446,32 +420,6 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
       const batch = writeBatch(db);
       const matchRef = doc(db, 'tournaments', tournamentId, 'matches', match.id);
 
-      const s1 = match.score1;
-      const s2 = match.score2;
-      const diff = Math.abs(s1 - s2);
-      const winTeam = s1 > s2 ? 1 : 2;
-      const winPlayers = winTeam === 1 ? match.team1 : match.team2;
-      const losePlayers = winTeam === 1 ? match.team2 : match.team1;
-
-      // Revert player stats
-      winPlayers.forEach(pid => {
-        const pRef = doc(db, 'tournaments', tournamentId, 'players', pid);
-        batch.update(pRef, {
-          points: increment(-diff),
-          gamesPlayed: increment(-1),
-          wins: increment(-1)
-        });
-      });
-
-      losePlayers.forEach(pid => {
-        const pRef = doc(db, 'tournaments', tournamentId, 'players', pid);
-        batch.update(pRef, {
-          points: increment(diff),
-          gamesPlayed: increment(-1)
-        });
-      });
-
-      // Reset match
       batch.update(matchRef, {
         score1: 0,
         score2: 0,
@@ -500,7 +448,11 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
       : roundMatches.some((match) => match.status === 'void');
     return matchesTab && (showOlderRounds || roundTab === 'voided' || round === currentRound);
   });
-  const hiddenOlderRoundCount = rounds.filter((round) => roundTab === 'active' && round !== currentRound).length;
+  const hiddenOlderRoundCount = rounds.filter((round) =>
+    roundTab === 'active' &&
+    round !== currentRound &&
+    matches.some((match) => match.round === round && match.status !== 'void')
+  ).length;
 
   return (
     <div className="space-y-8 sm:space-y-12">
@@ -610,6 +562,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                 const winnerTeam = getWinnerTeam(match);
                 const isEditingThisMatch = editingId === match.id;
                 const canEditThisMatch = canEditScores && !isFrozenPreliminaryMatch(match);
+                const canManageThisMatch = canManageGameActions && !isFrozenPreliminaryMatch(match);
                 const inlineValidation = isEditingThisMatch && score1 !== '' && score2 !== ''
                   ? getScoreValidationMessage(parseInt(score1, 10), parseInt(score2, 10))
                   : null;
@@ -671,7 +624,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                            <Pencil className="w-2.5 sm:w-3.5 h-2.5 sm:h-3.5" />
                          </button>
                        )}
-                       {canEditThisMatch && (
+                       {canManageThisMatch && (
                          <button 
                            onClick={() => undoScore(match)}
                            className="p-1 sm:p-1.5 bg-white border border-slate-800 rounded-lg text-orange-500 hover:bg-orange-50 transition-colors shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]"
@@ -757,7 +710,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                   </div>
                 )}
 
-                {canEditThisMatch && (
+                {canManageThisMatch && (
                   <div className="mt-4 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-center">
                     {match.status !== 'pending' && !playoffStarted && (
                       <button

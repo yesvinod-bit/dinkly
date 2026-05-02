@@ -77,7 +77,10 @@ export const claimInviteCode = async (uid: string, email: string, displayName: s
 };
 
 export const generateInviteCode = async (maxUses: number = 10) => {
-  const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+  const CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  const code = Array.from(bytes, (b) => CHARS[b % CHARS.length]).join('');
   await addDoc(collection(db, 'inviteCodes'), {
     code,
     maxUses,
