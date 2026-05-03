@@ -682,69 +682,45 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                   )}
                 </div>
 
-                {canEditThisMatch && match.status !== 'void' && (
+                {canEditThisMatch && match.status !== 'void' && (isEditingThisMatch || match.status !== 'completed') && (
                   <div className="mt-3 pt-2.5 border-t-2 border-dashed border-slate-200">
                     {isEditingThisMatch ? (
                       <div className="flex flex-col gap-4">
                         <div className="flex items-center justify-center gap-2 w-full">
                           <div className="flex flex-col items-center gap-1 flex-1">
                             <span className={`text-[10px] font-bold uppercase tracking-[0.16em] ${winnerTeam === 1 ? 'text-lime-600' : 'text-slate-400'}`}>{competitorLabel} 1</span>
-                            <div className="flex items-center gap-1 w-full">
-                              <button
-                                type="button"
-                                onClick={() => setScore1(String(Math.max(0, parseInt(score1||'0') - 1)))}
-                                className="border-2 border-slate-800 bg-white text-slate-800 font-black text-xl w-10 h-14 rounded-xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] active:translate-y-0.5 active:shadow-none transition-all shrink-0"
-                              >−</button>
-                              <input
-                                autoFocus
-                                type="number"
-                                min="0"
-                                max="20"
-                                value={score1}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  if (val === '' || (parseInt(val) >= 0 && parseInt(val) <= 20)) {
-                                    setScore1(val);
-                                  }
-                                }}
-                                className="h-14 flex-1 min-w-0 rounded-2xl border-2 border-slate-800 bg-white text-center text-2xl font-black text-slate-900 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] focus:outline-none focus:ring-4 focus:ring-lime-200 p-0"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setScore1(String(Math.min(20, parseInt(score1||'0') + 1)))}
-                                className="border-2 border-slate-800 bg-white text-slate-800 font-black text-xl w-10 h-14 rounded-xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] active:translate-y-0.5 active:shadow-none transition-all shrink-0"
-                              >+</button>
-                            </div>
+                            <input
+                              autoFocus
+                              type="number"
+                              min="0"
+                              max="20"
+                              value={score1}
+                              onChange={e => {
+                                const val = e.target.value;
+                                if (val === '' || (parseInt(val) >= 0 && parseInt(val) <= 20)) {
+                                  setScore1(val);
+                                }
+                              }}
+                              className="h-14 w-full rounded-2xl border-2 border-slate-800 bg-white text-center text-2xl font-black text-slate-900 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] focus:outline-none focus:ring-4 focus:ring-lime-200 p-0"
+                            />
                           </div>
                           <span className="mt-3 text-slate-800 font-black text-xl">:</span>
                           <div className="flex flex-col items-center gap-1 flex-1">
                             <span className={`text-[10px] font-bold uppercase tracking-[0.16em] ${winnerTeam === 2 ? 'text-orange-600' : 'text-slate-400'}`}>{competitorLabel} 2</span>
-                            <div className="flex items-center gap-1 w-full">
-                              <button
-                                type="button"
-                                onClick={() => setScore2(String(Math.max(0, parseInt(score2||'0') - 1)))}
-                                className="border-2 border-slate-800 bg-white text-slate-800 font-black text-xl w-10 h-14 rounded-xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] active:translate-y-0.5 active:shadow-none transition-all shrink-0"
-                              >−</button>
-                              <input
-                                type="number"
-                                min="0"
-                                max="20"
-                                value={score2}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  if (val === '' || (parseInt(val) >= 0 && parseInt(val) <= 20)) {
-                                    setScore2(val);
-                                  }
-                                }}
-                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submitScore(match); } }}
-                                className="h-14 flex-1 min-w-0 rounded-2xl border-2 border-slate-800 bg-white text-center text-2xl font-black text-slate-900 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] focus:outline-none focus:ring-4 focus:ring-orange-200 p-0"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setScore2(String(Math.min(20, parseInt(score2||'0') + 1)))}
-                                className="border-2 border-slate-800 bg-white text-slate-800 font-black text-xl w-10 h-14 rounded-xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] active:translate-y-0.5 active:shadow-none transition-all shrink-0"
-                              >+</button>
-                            </div>
+                            <input
+                              type="number"
+                              min="0"
+                              max="20"
+                              value={score2}
+                              onChange={e => {
+                                const val = e.target.value;
+                                if (val === '' || (parseInt(val) >= 0 && parseInt(val) <= 20)) {
+                                  setScore2(val);
+                                }
+                              }}
+                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submitScore(match); } }}
+                              className="h-14 w-full rounded-2xl border-2 border-slate-800 bg-white text-center text-2xl font-black text-slate-900 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] focus:outline-none focus:ring-4 focus:ring-orange-200 p-0"
+                            />
                           </div>
                         </div>
                         <div className={`rounded-xl border px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] ${

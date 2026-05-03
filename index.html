@@ -3,10 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Dinkly | Pickleball Mixer</title>
-    <meta name="description" content="Dinkly - The ultimate Pickleball round-robin manager" />
-    
-    <!-- PWA & Mobile Optimization -->
+
+    <title>Dinkly — Free Pickleball Round Robin Scorer & Tournament App</title>
+    <meta name="description" content="Dinkly is a free pickleball round robin scorer and tournament manager. Create or join a mixer, track live scores, auto-generate balanced pairings, and view real-time standings — no app download required." />
+    <meta name="keywords" content="pickleball round robin, pickleball scorer, pickleball tournament app, pickleball mixer, pickleball score tracker, free pickleball app, pickleball round robin generator" />
+    <link rel="canonical" href="https://dinkly.net" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://dinkly.net" />
+    <meta property="og:site_name" content="Dinkly" />
+    <meta property="og:title" content="Dinkly — Free Pickleball Round Robin Scorer" />
+    <meta property="og:description" content="Create or join a pickleball round robin in seconds. Smart pairings, live score tracking, and real-time leaderboards for your mixer or tournament." />
+    <meta property="og:image" content="https://dinkly.net/icons/icon-512.png" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Dinkly — Free Pickleball Round Robin Scorer" />
+    <meta name="twitter:description" content="Create or join a pickleball round robin in seconds. Smart pairings, live score tracking, and real-time leaderboards for your mixer or tournament." />
+    <meta name="twitter:image" content="https://dinkly.net/icons/icon-512.png" />
+
+    <!-- PWA & Mobile -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#0f172a" />
     <meta name="application-name" content="Dinkly" />
@@ -17,14 +34,55 @@
     <meta name="apple-mobile-web-app-title" content="Dinkly" />
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    
-    <!-- Open Graph -->
-    <meta property="og:title" content="Dinkly | Pickleball Mixer" />
-    <meta property="og:description" content="Join the court and track live scores on Dinkly." />
-    <meta property="og:image" content="/icons/icon-512.png" />
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Dinkly",
+      "url": "https://dinkly.net",
+      "applicationCategory": "SportsApplication",
+      "operatingSystem": "Web, iOS, Android",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "description": "Free pickleball round robin scorer and tournament manager. Create mixers, generate balanced pairings, track live scores, and view real-time standings.",
+      "featureList": [
+        "Automatic round robin pairing generation",
+        "Live score entry and leaderboard",
+        "Doubles and singles formats",
+        "Fixed and random partner modes",
+        "Playoff bracket generation",
+        "Player profiles and stats",
+        "Shareable join links and QR codes",
+        "Works on any device, no download required"
+      ]
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <div style="max-width:600px;margin:60px auto;padding:24px;font-family:sans-serif;line-height:1.6">
+        <h1>Dinkly — Free Pickleball Round Robin Scorer</h1>
+        <p>Dinkly is a free web app for running pickleball round robin mixers and tournaments. Create a tournament in seconds, share a join link or QR code, and let Dinkly automatically generate balanced pairings, track live scores, and display real-time standings.</p>
+        <h2>Features</h2>
+        <ul>
+          <li>Pickleball round robin pairing generator — minimizes repeat partners and opponents</li>
+          <li>Live score entry with instant leaderboard updates</li>
+          <li>Doubles (2v2) and singles (1v1) formats</li>
+          <li>Fixed partner teams or random partner rotation</li>
+          <li>Playoff bracket with seeded matchups</li>
+          <li>Player profiles with stats across tournaments</li>
+          <li>Shareable join links and QR codes — no app download needed</li>
+          <li>Installable as a PWA on iOS and Android</li>
+        </ul>
+        <p>To use Dinkly, please enable JavaScript in your browser.</p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

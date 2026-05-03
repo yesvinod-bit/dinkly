@@ -9,7 +9,7 @@ import {
   serverTimestamp,
   writeBatch
 } from 'firebase/firestore';
-import { auth, db, Player, TournamentFormat, TournamentPairingMode, getReadableFirestoreError } from '../lib/firebase';
+import { auth, db, Player, Match, TournamentFormat, TournamentPairingMode, getReadableFirestoreError } from '../lib/firebase';
 import { getFixedPairingStatus, getMinimumPlayers, getTournamentFormat, getTournamentPairingMode } from '../lib/tournamentLogic';
 import { BadgeCheck, Link2, Shuffle, Unlink2, UserMinus, UserPlus, PlayCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -17,6 +17,7 @@ import { motion, AnimatePresence } from 'motion/react';
 interface Props {
   tournamentId: string;
   players: Player[];
+  matches?: Match[];
   format?: TournamentFormat;
   pairingMode?: TournamentPairingMode;
   canAddPlayers: boolean;
@@ -25,7 +26,7 @@ interface Props {
   onStart: () => void;
 }
 
-export default function PlayerManager({ tournamentId, players, format, pairingMode, canAddPlayers, isOwner, status, onStart }: Props) {
+export default function PlayerManager({ tournamentId, players, matches = [], format, pairingMode, canAddPlayers, isOwner, status, onStart }: Props) {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busyPlayerId, setBusyPlayerId] = useState<string | null>(null);
@@ -122,7 +123,7 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
   };
 
   const changePairingMode = async (mode: TournamentPairingMode) => {
-    if (!isOwner || status !== 'setup' || tournamentFormat !== 'doubles') return;
+    if (!isOwner || !canModifyRoster || tournamentFormat !== 'doubles') return;
     setError(null);
     setBusyPlayerId(`pairing-${mode}`);
     try {
@@ -162,7 +163,7 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
   };
 
   const clearFixedPair = async (pairId: string) => {
-    if (!isOwner || status !== 'setup') return;
+    if (!isOwner || !canModifyRoster) return;
     setError(null);
     setBusyPlayerId(`pair-${pairId}`);
     try {
@@ -202,8 +203,15 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
     }
   };
 
+  const hasRealGames = matches.some(m => m.status !== 'void');
+  const canModifyRoster = status === 'setup' || (status === 'active' && isOwner && !hasRealGames);
+
+  const sortByFirstName = (a: Player, b: Player) =>
+    a.name.split(' ')[0].toLowerCase().localeCompare(b.name.split(' ')[0].toLowerCase());
+  const sortedPlayers = [...players].sort(sortByFirstName);
+
   const getPlayerName = (playerId: string) => players.find((player) => player.id === playerId)?.name || 'Unknown';
-  const unpairedPlayers = fixedPairingStatus.unpairedPlayers;
+  const unpairedPlayers = [...fixedPairingStatus.unpairedPlayers].sort(sortByFirstName);
   const allFixedPairs = [...fixedPairingStatus.pairs, ...fixedPairingStatus.invalidPairs];
 
   return (
@@ -233,7 +241,13 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
           </div>
         )}
 
-        {status === 'setup' && isOwner && tournamentFormat === 'doubles' && (
+        {status === 'active' && isOwner && !hasRealGames && (
+          <div className="mb-4 rounded-2xl border-2 border-orange-300 bg-orange-50 px-4 py-3 text-[10px] font-bold uppercase tracking-[0.16em] text-orange-800">
+            All games are voided — roster is unlocked. Add or remove players, then generate a new round.
+          </div>
+        )}
+
+        {canModifyRoster && isOwner && tournamentFormat === 'doubles' && (
           <div className="mb-4 rounded-2xl border-2 border-slate-800 bg-white px-4 py-4 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -292,7 +306,7 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
               </span>
             </div>
 
-            {status === 'setup' && isOwner && (
+            {canModifyRoster && isOwner && (
               <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
                 <select
                   value={pairPlayerAId}
@@ -348,7 +362,7 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
                         {pair.playerIds.length === 2 ? 'Locked pair' : `${pair.playerIds.length} players assigned`}
                       </p>
                     </div>
-                    {status === 'setup' && isOwner && (
+                    {canModifyRoster && isOwner && (
                       <button
                         type="button"
                         onClick={() => clearFixedPair(pair.id)}
@@ -411,7 +425,7 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
           </div>
         )}
 
-        {status === 'setup' && canAddPlayers && (
+        {(status === 'setup' && canAddPlayers || status === 'active' && isOwner && !hasRealGames) && (
           <div className="flex flex-col sm:flex-row gap-4 mb-8">
             <input 
               type="text"
@@ -457,7 +471,7 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-24">
         <AnimatePresence>
-          {players.map(p => (
+          {sortedPlayers.map(p => (
             <motion.div 
               key={p.id}
               layout
@@ -504,8 +518,8 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
                     {busyPlayerId === p.id ? 'Claiming...' : 'Claim'}
                   </button>
                 )}
-                {isOwner && status === 'setup' && (
-                  <button 
+                {isOwner && canModifyRoster && (
+                  <button
                     onClick={() => removePlayer(p.id)}
                     className="p-2 border-2 border-slate-800 rounded-xl text-slate-300 hover:text-orange-500 hover:border-orange-500 hover:bg-orange-50 transition-all shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] active:translate-y-0.5 active:shadow-none"
                     title="Remove Player"

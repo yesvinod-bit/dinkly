@@ -1410,11 +1410,11 @@ export default function App() {
               )}
 
               {homeView === 'home' && (
-              <div className="grid gap-4 md:grid-cols-[1.05fr_0.95fr] md:gap-5">
+              <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:gap-5">
                 <motion.div 
                   id="create-mixer"
                   whileHover={{ scale: 1.01 }}
-                  className="bg-lime-400 border-2 border-slate-800 rounded-2xl p-4 md:p-5 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] cursor-pointer relative overflow-hidden group"
+                  className="min-w-0 bg-lime-400 border-2 border-slate-800 rounded-2xl p-4 md:p-5 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] cursor-pointer relative overflow-hidden group"
                   onClick={() => {}}
                 >
                   <div className="relative z-10">
@@ -1436,7 +1436,7 @@ export default function App() {
                             e.stopPropagation();
                             setNewTournamentFormat('doubles');
                           }}
-                          className={`rounded-xl border-2 px-3 py-3 text-left shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none ${
+                          className={`rounded-xl border-2 px-3 py-2.5 text-center shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none ${
                             newTournamentFormat === 'doubles'
                               ? 'border-slate-800 bg-white'
                               : 'border-slate-300 bg-lime-100/60 text-slate-500 shadow-none'
@@ -1444,9 +1444,7 @@ export default function App() {
                           aria-pressed={newTournamentFormat === 'doubles'}
                         >
                           <div className="text-xs font-black uppercase text-slate-800">Doubles</div>
-                          <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">
-                            2v2 • 4 Players Min
-                          </div>
+                          <div className="text-[9px] font-bold text-slate-400">2v2</div>
                         </button>
                         <button
                           type="button"
@@ -1455,7 +1453,7 @@ export default function App() {
                             setNewTournamentFormat('singles');
                             setNewTournamentPairingMode(DEFAULT_TOURNAMENT_PAIRING_MODE);
                           }}
-                          className={`rounded-xl border-2 px-3 py-3 text-left shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none ${
+                          className={`rounded-xl border-2 px-3 py-2.5 text-center shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none ${
                             newTournamentFormat === 'singles'
                               ? 'border-slate-800 bg-white'
                               : 'border-slate-300 bg-lime-100/60 text-slate-500 shadow-none'
@@ -1463,9 +1461,7 @@ export default function App() {
                           aria-pressed={newTournamentFormat === 'singles'}
                         >
                           <div className="text-xs font-black uppercase text-slate-800">Singles</div>
-                          <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">
-                            1v1 • 2 Players Min
-                          </div>
+                          <div className="text-[9px] font-bold text-slate-400">1v1</div>
                         </button>
                       </div>
                       <p className="mt-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-700">
@@ -1475,27 +1471,26 @@ export default function App() {
                       </p>
                     </div>
                     {newTournamentFormat === 'doubles' && (
-                      <div className="mb-3 flex items-center gap-2 rounded-xl border-2 border-slate-800 bg-white/45 p-1 shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]">
-                        <span className="px-2 text-[10px] font-black uppercase tracking-[0.16em] text-slate-700">
-                          Pairs
+                      <div className="mb-3 flex items-center gap-2 rounded-xl border-2 border-slate-800 bg-white/45 p-1 pr-1.5 shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]">
+                        <span className="flex-1 px-2 text-[10px] font-black uppercase tracking-[0.16em] text-slate-700">
+                          Pairs · <span className={newTournamentPairingMode === 'random' ? 'text-slate-900' : 'text-orange-600'}>{newTournamentPairingMode === 'random' ? 'Random' : 'Fixed'}</span>
                         </span>
-                        <div className="grid flex-1 grid-cols-2 gap-1">
+                        <div className="flex gap-1">
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               setNewTournamentPairingMode('random');
                             }}
-                            className={`flex min-h-9 items-center justify-center gap-1.5 rounded-lg border-2 px-2 text-[10px] font-black uppercase transition-all ${
+                            className={`flex min-h-9 w-9 items-center justify-center rounded-lg border-2 transition-all ${
                               newTournamentPairingMode === 'random'
                                 ? 'border-slate-800 bg-lime-400 text-slate-900 shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]'
                                 : 'border-transparent bg-white/50 text-slate-500 hover:bg-white'
                             }`}
                             aria-pressed={newTournamentPairingMode === 'random'}
-                            title="Random Pair"
+                            title="Random partners"
                           >
                             <Shuffle className="h-3.5 w-3.5" />
-                            Random
                           </button>
                           <button
                             type="button"
@@ -1503,16 +1498,15 @@ export default function App() {
                               e.stopPropagation();
                               setNewTournamentPairingMode('fixed');
                             }}
-                            className={`flex min-h-9 items-center justify-center gap-1.5 rounded-lg border-2 px-2 text-[10px] font-black uppercase transition-all ${
+                            className={`flex min-h-9 w-9 items-center justify-center rounded-lg border-2 transition-all ${
                               newTournamentPairingMode === 'fixed'
                                 ? 'border-slate-800 bg-orange-500 text-white shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]'
                                 : 'border-transparent bg-white/50 text-slate-500 hover:bg-white'
                             }`}
                             aria-pressed={newTournamentPairingMode === 'fixed'}
-                            title="Fixed Pair"
+                            title="Fixed teams"
                           >
                             <Link2 className="h-3.5 w-3.5" />
-                            Fixed
                           </button>
                         </div>
                       </div>
@@ -1555,16 +1549,16 @@ export default function App() {
                 <motion.div 
                   id="join-mixer"
                   whileHover={{ scale: 1.01 }}
-                  className="bg-white border-2 border-slate-800 rounded-2xl p-4 shadow-[3px_3px_0px_0px_rgba(163,230,53,1)] group"
+                  className="min-w-0 bg-white border-2 border-slate-800 rounded-2xl p-4 shadow-[3px_3px_0px_0px_rgba(163,230,53,1)] group"
                 >
                   <div className="flex-1">
                     <div className="w-8 h-8 md:w-12 md:h-12 bg-lime-50 border-2 border-slate-800 rounded-lg md:rounded-xl flex items-center justify-center mb-3 md:mb-6">
                       <Hash className="w-4 h-4 md:w-6 md:h-6 text-slate-400" />
                     </div>
                     <h2 className="text-xl md:text-2xl font-black text-slate-800 mb-2 md:mb-4 uppercase tracking-tight">Join by Code</h2>
-                    <div className="flex flex-col sm:flex-row gap-2 md:gap-3">
-                      <input 
-                        type="text" 
+                    <div className="flex flex-col gap-2">
+                      <input
+                        type="text"
                         inputMode="text"
                         autoComplete="one-time-code"
                         value={joinCode}
@@ -1574,24 +1568,26 @@ export default function App() {
                         }}
                         onKeyDown={(e) => e.key === 'Enter' && joinByCode()}
                         placeholder="CODE12 or paste link"
-                        className="brutal-input flex-1 font-mono tracking-widest text-lg md:text-2xl uppercase text-center sm:text-left"
+                        className="brutal-input w-full font-mono tracking-widest text-lg uppercase text-center"
                       />
-                      {typeof navigator !== 'undefined' && Boolean(navigator.clipboard?.readText) && (
+                      <div className="flex gap-2">
+                        {typeof navigator !== 'undefined' && Boolean(navigator.clipboard?.readText) && (
+                          <button
+                            type="button"
+                            onClick={pasteJoinCode}
+                            className="flex min-h-12 items-center justify-center rounded-xl border-2 border-slate-800 bg-white px-4 text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
+                            title="Paste Code or Link"
+                          >
+                            <ClipboardPaste className="h-5 w-5" />
+                          </button>
+                        )}
                         <button
-                          type="button"
-                          onClick={pasteJoinCode}
-                          className="flex min-h-12 items-center justify-center rounded-xl border-2 border-slate-800 bg-white px-4 text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
-                          title="Paste Code or Link"
+                          onClick={joinByCode}
+                          className="brutal-button-lime flex-1 text-sm"
                         >
-                          <ClipboardPaste className="h-5 w-5" />
+                          JOIN
                         </button>
-                      )}
-                      <button 
-                        onClick={joinByCode}
-                        className="brutal-button-lime px-6 md:px-8 text-sm md:text-xl"
-                      >
-                        JOIN
-                      </button>
+                      </div>
                     </div>
                     <p className="mt-3 text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
                       Spaces, dashes, and shared links work too.

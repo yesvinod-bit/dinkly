@@ -994,6 +994,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
               <PlayerManager
                 tournamentId={tournamentId}
                 players={players}
+                matches={matches}
                 format={tournamentFormat}
                 pairingMode={tournamentPairingMode}
                 canAddPlayers={canContributePlayers}
