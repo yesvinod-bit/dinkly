@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { 
   doc, 
   collection,
@@ -8,7 +8,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth, Player, Match, Session, SessionAbsence, TournamentFormat, getReadableFirestoreError, handleFirestoreError } from '../lib/firebase';
 import { getSessionForRound, getTournamentFormat } from '../lib/tournamentLogic';
-import { CalendarDays, CheckCircle2, ChevronRight, User, Swords, Share2, RotateCcw, Clock3, Pencil, PartyPopper, Sparkles } from 'lucide-react';
+import { CalendarDays, CheckCircle2, ChevronRight, User, Swords, Pencil, PartyPopper, Sparkles, X, RotateCcw, Share2 } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface Props {
@@ -107,13 +107,28 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
   const [score2, setScore2] = useState<string>('');
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyMatchId, setBusyMatchId] = useState<string | null>(null);
-  const [roundTab, setRoundTab] = useState<'active' | 'voided'>('active');
-  const [showOlderRounds, setShowOlderRounds] = useState(false);
   const [celebration, setCelebration] = useState<ScoreCelebration | null>(null);
   const tournamentFormat = getTournamentFormat(format);
   const canEditScores = canEnterScores && !readOnly;
   const canManageGameActions = isOwner && !readOnly;
   const playoffStarted = matches.some((match) => match.stage === 'playoff');
+
+  const playerStats = useMemo(() => {
+    const stats: Record<string, { wins: number; games: number }> = {};
+    matches.filter(m => m.status === 'completed').forEach(m => {
+      const team1Won = m.score1 > m.score2;
+      [...m.team1, ...m.team2].forEach(pid => {
+        if (!stats[pid]) stats[pid] = { wins: 0, games: 0 };
+        stats[pid].games += 1;
+        if ((m.team1.includes(pid) && team1Won) || (m.team2.includes(pid) && !team1Won)) stats[pid].wins += 1;
+      });
+    });
+    return stats;
+  }, [matches]);
+
+  const haptic = (ms = 40) => {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(ms);
+  };
 
   const getPlayerName = (id: string) => players.find((p) => p.id === id)?.name || 'Unknown';
 
@@ -254,7 +269,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
       setActionError('Preliminary games are frozen after playoffs begin.');
       return;
     }
-    if (!window.confirm(`Void this game in round ${match.round}? Completed scores for this game will be removed from the standings.`)) return;
+    if (!window.confirm(`Void this game in round ${match.round}? The score will be kept for reference but excluded from standings.`)) return;
     setActionError(null);
     setBusyMatchId(match.id);
 
@@ -263,8 +278,6 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
 
       const matchRef = doc(db, 'tournaments', tournamentId, 'matches', match.id);
       batch.update(matchRef, {
-        score1: 0,
-        score2: 0,
         status: 'void',
         updatedAt: serverTimestamp(),
         completedAt: null,
@@ -398,6 +411,7 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
       }
 
       await batch.commit();
+      haptic(45);
       const winnerTeam = s1 > s2 ? 1 : 2;
       const winnerIds = winnerTeam === 1 ? match.team1 : match.team2;
       setCelebration({
@@ -450,64 +464,21 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
   };
 
   const rounds = Array.from(new Set(matches.map(m => m.round))).sort((a, b) => b - a);
-  const currentRound = rounds[0] ?? 0;
-  const visibleRounds = rounds.filter((round) => {
-    const roundMatches = matches.filter((match) => match.round === round);
-    const matchesTab = roundTab === 'active'
-      ? roundMatches.some((match) => match.status !== 'void')
-      : roundMatches.some((match) => match.status === 'void');
-    return matchesTab && (showOlderRounds || roundTab === 'voided' || round === currentRound);
-  });
-  const hiddenOlderRoundCount = rounds.filter((round) =>
-    roundTab === 'active' &&
-    round !== currentRound &&
-    matches.some((match) => match.round === round && match.status !== 'void')
-  ).length;
+  const visibleRounds = rounds;
 
   return (
-    <div className="space-y-8 sm:space-y-12">
+    <div className="space-y-6 sm:space-y-10">
       {celebration && <ScoreCelebrationOverlay celebration={celebration} />}
       {actionError && (
         <div className="rounded-2xl border-2 border-orange-200 bg-orange-50 px-4 py-3 text-sm font-bold text-orange-700">
           {actionError}
         </div>
       )}
-      {matches.some((match) => match.status === 'void') && (
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={() => setRoundTab('active')}
-            className={`rounded-2xl border-2 border-slate-800 px-4 py-2 text-xs font-black uppercase shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] ${
-              roundTab === 'active' ? 'bg-lime-400 text-slate-900' : 'bg-white text-slate-600'
-            }`}
-          >
-            Games
-          </button>
-          <button
-            onClick={() => setRoundTab('voided')}
-            className={`rounded-2xl border-2 border-slate-800 px-4 py-2 text-xs font-black uppercase shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] ${
-              roundTab === 'voided' ? 'bg-orange-500 text-white' : 'bg-white text-slate-600'
-            }`}
-          >
-            Voided Games
-          </button>
-        </div>
-      )}
-      {roundTab === 'active' && hiddenOlderRoundCount > 0 && (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => setShowOlderRounds((prev) => !prev)}
-            className="rounded-xl border-2 border-slate-800 bg-white px-4 py-2 text-[10px] font-black uppercase text-slate-700 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
-          >
-            {showOlderRounds ? 'Hide older rounds' : `Show older rounds (${hiddenOlderRoundCount})`}
-          </button>
-        </div>
-      )}
       {(() => {
         let lastSessionId: string | undefined;
         return visibleRounds.map((round) => {
           const sessionForRound = sessions.length > 1 ? getSessionForRound(round, sessions) : null;
-          const showSessionHeader = sessionForRound && sessionForRound.id !== lastSessionId && roundTab === 'active';
+          const showSessionHeader = sessionForRound && sessionForRound.id !== lastSessionId;
           lastSessionId = sessionForRound?.id;
 
           return (
@@ -526,66 +497,42 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
               <div>
           {(() => {
             const roundMatches = matches
-              .filter((match) => (
-                match.round === round && (roundTab === 'active' ? match.status !== 'void' : match.status === 'void')
-              ))
+              .filter((match) => match.round === round)
               .sort((a, b) => {
+                if (a.status === 'void' && b.status !== 'void') return 1;
+                if (a.status !== 'void' && b.status === 'void') return -1;
                 if (a.status === b.status) return a.id.localeCompare(b.id);
                 if (a.status === 'pending') return -1;
                 if (b.status === 'pending') return 1;
                 return a.status.localeCompare(b.status);
               });
-            const activePlayerIds = new Set(roundMatches.flatMap((match) => [...match.team1, ...match.team2]));
-            const benchedPlayers = roundTab === 'active'
-              ? players.filter((player) => !activePlayerIds.has(player.id))
-              : [];
+            const activePlayerIds = new Set(
+              roundMatches
+                .filter((m) => m.status !== 'void')
+                .flatMap((match) => [...match.team1, ...match.team2])
+            );
+            const benchedPlayers = players.filter((player) => !activePlayerIds.has(player.id));
             const roundLabel = roundMatches.find((match) => match.roundLabel)?.roundLabel || `RD ${round}`;
             const isPlayoffRound = roundMatches.some((match) => match.stage === 'playoff');
 
             return (
               <>
-          <div className="mb-4 flex items-center gap-4 sm:mb-6">
-            <span className="bg-zinc-900 text-white px-3 py-1 rounded-full text-xs font-bold font-mono uppercase">{roundLabel}</span>
+          <div className="mb-3 flex items-center gap-2 flex-wrap">
+            <span className="bg-slate-900 text-lime-400 px-2.5 py-1 rounded-lg text-[10px] font-black font-mono uppercase tracking-[0.16em] border border-slate-700 shadow-[2px_2px_0px_0px_rgba(163,230,53,0.3)]">{roundLabel}</span>
             {roundLabel !== `RD ${round}` && (
-              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
-                RD {round}
-              </span>
+              <span className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-400">RD {round}</span>
             )}
             {isPlayoffRound && (
-              <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-orange-700">
-                Playoff
-              </span>
+              <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.12em] text-orange-600">Playoff</span>
             )}
-            <div className="h-px bg-zinc-100 flex-1" />
-            {roundTab === 'voided' && (
-              <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-orange-700">
-                VOIDED
+            <div className="h-px bg-slate-200 flex-1 min-w-4" />
+            {benchedPlayers.length > 0 && (
+              <span className="text-[11px] font-bold text-slate-500 tracking-wide">
+                sitting out: {benchedPlayers.map(p => p.name).join(', ')}
               </span>
             )}
           </div>
-          {roundTab === 'active' && benchedPlayers.length > 0 && (
-            <div className="mb-5 rounded-3xl border-2 border-slate-800 bg-gradient-to-r from-orange-100 via-amber-50 to-lime-100 p-4 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)]">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-slate-800 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white">
-                  Bench
-                </span>
-                <span className="text-xs font-bold uppercase tracking-[0.14em] text-slate-600">
-                  Sitting out this round
-                </span>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {benchedPlayers.map((player) => (
-                  <span
-                    key={player.id}
-                    className="rounded-full border-2 border-slate-800 bg-white px-3 py-2 text-sm font-black text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
-                  >
-                    {player.name}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
             {roundMatches.map((match) => (
               (() => {
                 const winnerTeam = getWinnerTeam(match);
@@ -597,216 +544,207 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                   : null;
 
                 return (
-              <motion.div 
+              <motion.div
                 key={match.id}
                 layout
-                className={`brutal-card relative overflow-hidden p-3 sm:p-6 transition-all ${
-                  match.status === 'completed' ? 'match-card-completed' : ''
-                }`}
+                className={`brutal-card relative overflow-hidden p-2.5 sm:p-4 transition-all ${
+                  match.status === 'completed' ? 'match-card-completed bg-lime-50/30' : ''
+                }${match.status === 'void' ? ' opacity-55' : ''}`}
               >
                 {match.status === 'completed' && (
                   <>
                     <div className="score-win-glow" />
-                    <div className="pointer-events-none absolute right-3 top-12 z-0 hidden flex-col gap-2 sm:flex">
+                    <div className="pointer-events-none absolute right-3 top-10 z-0 hidden flex-col gap-2 sm:flex">
                       <span className="score-flight-chip score-flight-chip-lime">Winner</span>
                       <span className="score-flight-chip score-flight-chip-orange">+{Math.abs(match.score1 - match.score2)}</span>
                     </div>
                   </>
                 )}
-                <div className="flex items-center justify-between mb-3 sm:mb-6">
-                   <div className="flex flex-wrap items-center gap-1.5 text-slate-400 font-mono text-[9px] sm:text-xs uppercase font-black">
-                     <span className="inline-flex items-center gap-1.5">
-                       <Swords className="w-2.5 h-2.5" /> GAME {match.id.slice(-4).toUpperCase()}
-                     </span>
-                     {match.stage === 'playoff' && match.seed1 && match.seed2 && (
-                       <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 font-sans text-[8px] font-black tracking-[0.14em] text-orange-700">
-                         Seed {match.seed1} vs {match.seed2}
-                       </span>
-                     )}
-                   </div>
-                   {match.status === 'void' && (
-                     <div className="flex items-center gap-2 sm:gap-3">
-                       <span className="flex items-center gap-1 text-orange-700 text-[9px] sm:text-xs font-black uppercase tracking-wider bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200">
-                         <span className="hidden xs:inline">Voided</span>
-                         <span className="xs:hidden">Void</span>
-                       </span>
-                     </div>
-                   )}
-                   {match.status === 'completed' && (
-                     <div className="flex items-center gap-2 sm:gap-3">
-                       <span className="score-pulse-pill flex items-center gap-1 text-lime-600 text-[9px] sm:text-xs font-black uppercase tracking-wider bg-lime-50 px-1.5 py-0.5 rounded border border-lime-200">
-                         <CheckCircle2 className="w-3 h-3" /> <span className="hidden xs:inline">Completed</span>
-                       </span>
-                       <button 
-                          onClick={() => shareMatch(match)}
-                          className="p-1 sm:p-1.5 bg-white border border-slate-800 rounded-lg text-slate-800 hover:bg-orange-50 transition-colors shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]"
-                          title="Share Match Result"
-                        >
-                          <Share2 className="w-2.5 sm:w-3.5 h-2.5 sm:h-3.5" />
-                        </button>
-                       {canEditThisMatch && (
-                         <button 
-                           onClick={() => startEditingMatch(match)}
-                           className="p-1 sm:p-1.5 bg-white border border-slate-800 rounded-lg text-slate-800 hover:bg-sky-50 transition-colors shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]"
-                           title="Edit Score"
-                         >
-                           <Pencil className="w-2.5 sm:w-3.5 h-2.5 sm:h-3.5" />
-                         </button>
-                       )}
-                       {canManageThisMatch && (
-                         <button 
-                           onClick={() => undoScore(match)}
-                           className="p-1 sm:p-1.5 bg-white border border-slate-800 rounded-lg text-orange-500 hover:bg-orange-50 transition-colors shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]"
-                           title="Undo Score"
-                         >
-                           <RotateCcw className="w-2.5 sm:w-3.5 h-2.5 sm:h-3.5" />
-                         </button>
-                       )}
-                     </div>
-                   )}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Swords className="w-2.5 h-2.5 shrink-0 text-slate-400" />
+                    <span className="font-mono text-[11px] uppercase font-black text-slate-500">{match.id.slice(-4).toUpperCase()}</span>
+                    {match.stage === 'playoff' && match.seed1 && match.seed2 && (
+                      <span className="rounded border border-orange-200 bg-orange-50 px-1.5 py-0.5 font-sans text-[8px] font-black text-orange-700">
+                        S{match.seed1}v{match.seed2}
+                      </span>
+                    )}
+                    {match.status === 'completed' && formatMatchTime(match.completedAt) && (
+                      <span className="text-[8px] font-bold text-slate-400 truncate">· {formatMatchTime(match.completedAt)}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {match.status === 'void' && (
+                      <span className="text-[9px] font-black uppercase text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200">VOID</span>
+                    )}
+                    {match.status === 'completed' && (
+                      <CheckCircle2 className="w-3 h-3 text-lime-500 shrink-0" />
+                    )}
+                    {canEditThisMatch && match.status === 'completed' && (
+                      <button onClick={() => startEditingMatch(match)} className="p-1 rounded-lg border border-slate-200 text-slate-400 hover:bg-sky-50 hover:border-slate-800 hover:text-slate-800 transition-colors" title="Edit Score">
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                    )}
+                    {canManageThisMatch && match.status === 'completed' && !playoffStarted && (
+                      <button onClick={() => repeatMatch(match)} disabled={busyMatchId === match.id} className="p-1 rounded-lg border border-slate-200 text-slate-300 hover:border-lime-400 hover:text-slate-700 transition-colors disabled:opacity-40" title="Repeat this match">
+                        <RotateCcw className="w-3 h-3" />
+                      </button>
+                    )}
+                    {canManageThisMatch && match.status !== 'void' && (
+                      <button onClick={() => voidMatch(match)} disabled={busyMatchId === match.id} className="p-1 rounded-lg border border-slate-200 text-slate-300 hover:border-orange-300 hover:text-orange-500 transition-colors disabled:opacity-40" title="Void this match">
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                    {canManageThisMatch && match.status === 'void' && (
+                      <button onClick={() => unvoidMatch(match)} disabled={busyMatchId === match.id} className="p-1 rounded-lg border border-slate-200 text-slate-400 hover:border-lime-400 hover:text-slate-800 transition-colors disabled:opacity-40" title="Restore match">
+                        <RotateCcw className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-5 items-center gap-1 sm:gap-4">
-                  <div className="col-span-2 space-y-1 sm:space-y-2">
+                  <div className="col-span-2 space-y-1">
                     {match.team1.map(pid => (
-                      <div key={pid} className={`flex items-center gap-1.5 rounded-xl px-1.5 py-1 text-[11px] sm:text-lg font-black truncate transition-colors ${
+                      <div key={pid} className={`flex items-center gap-1.5 rounded-xl px-1.5 py-1 transition-colors ${
                         winnerTeam === 1 ? 'winner-name-pop bg-lime-100 text-lime-900 ring-2 ring-lime-300' : 'text-slate-800'
                       }`}>
-                        <div className={`w-4 h-4 sm:w-8 sm:h-8 rounded-md sm:rounded-lg border border-slate-800 flex items-center justify-center text-slate-800 shrink-0 ${
+                        <div className={`w-5 h-5 sm:w-8 sm:h-8 rounded-md border border-slate-800 flex items-center justify-center text-slate-800 shrink-0 ${
                           winnerTeam === 1 ? 'bg-lime-300' : 'bg-lime-100'
                         }`}>
-                          <User className="w-2.5 h-2.5 sm:w-4 sm:h-4" />
+                          <User className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
                         </div>
-                        {winnerTeam === 1 && <Sparkles className="h-3 w-3 shrink-0 text-lime-600" />}
-                        <span className="truncate">{getPlayerDisplayName(pid, match.round)}</span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1">
+                            {winnerTeam === 1 && <Sparkles className="h-3 w-3 shrink-0 text-lime-600" />}
+                            <span className="truncate text-sm sm:text-base font-black">{getPlayerDisplayName(pid, match.round)}</span>
+                          </div>
+                          {playerStats[pid]?.games > 0 && (
+                            <span className="text-[9px] font-bold text-slate-400">{playerStats[pid].wins}W · {playerStats[pid].games}G</span>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
 
                   <div className="col-span-1 flex flex-col items-center justify-center">
-                    <div className="bg-lime-400 w-6 h-6 sm:w-12 sm:h-12 rounded-full border-2 border-slate-800 flex items-center justify-center font-black text-[10px] sm:text-lg italic shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)]">
+                    <div className="bg-slate-900 w-7 h-7 sm:w-10 sm:h-10 rounded-lg border-2 border-slate-800 flex items-center justify-center font-black text-[9px] sm:text-xs italic text-lime-400 shadow-[2px_2px_0px_0px_rgba(163,230,53,0.6)] rotate-3">
                       VS
                     </div>
                   </div>
 
-                  <div className="col-span-2 space-y-1 sm:space-y-2 text-right">
+                  <div className="col-span-2 space-y-1">
                     {match.team2.map(pid => (
-                      <div key={pid} className={`flex items-center justify-end gap-1.5 rounded-xl px-1.5 py-1 text-[11px] sm:text-lg font-black truncate transition-colors ${
+                      <div key={pid} className={`flex items-center justify-end gap-1.5 rounded-xl px-1.5 py-1 transition-colors ${
                         winnerTeam === 2 ? 'winner-name-pop bg-orange-100 text-orange-900 ring-2 ring-orange-300' : 'text-slate-800'
                       }`}>
-                        <span className="truncate">{getPlayerDisplayName(pid, match.round)}</span>
-                        {winnerTeam === 2 && <Sparkles className="h-3 w-3 shrink-0 text-orange-600" />}
-                        <div className={`w-4 h-4 sm:w-8 sm:h-8 rounded-md sm:rounded-lg border border-slate-800 flex items-center justify-center text-slate-800 shrink-0 ${
+                        <div className="min-w-0 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <span className="truncate text-sm sm:text-base font-black">{getPlayerDisplayName(pid, match.round)}</span>
+                            {winnerTeam === 2 && <Sparkles className="h-3 w-3 shrink-0 text-orange-600" />}
+                          </div>
+                          {playerStats[pid]?.games > 0 && (
+                            <span className="text-[9px] font-bold text-slate-400">{playerStats[pid].wins}W · {playerStats[pid].games}G</span>
+                          )}
+                        </div>
+                        <div className={`w-5 h-5 sm:w-8 sm:h-8 rounded-md border border-slate-800 flex items-center justify-center text-slate-800 shrink-0 ${
                           winnerTeam === 2 ? 'bg-orange-300' : 'bg-orange-100'
                         }`}>
-                          <User className="w-2.5 h-2.5 sm:w-4 sm:h-4" />
+                          <User className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                <div className="mt-4 flex justify-center">
-                   <div className={`bg-slate-800 rounded-xl px-4 py-1.5 border-2 border-white shadow-[3px_3px_0px_0px_rgba(163,230,53,1)] ${
-                     match.status === 'completed' ? 'score-result-bounce' : ''
-                   }`}>
-                      <div className="font-mono text-xl sm:text-2xl font-black tracking-tighter flex items-center text-white">
-                        <span className={match.score1 > match.score2 ? 'text-lime-400' : 'text-white'}>
-                          {match.score1}
-                        </span>
-                        <span className="text-slate-500 mx-2">-</span>
-                        <span className={match.score2 > match.score1 ? 'text-lime-400' : 'text-white'}>
-                          {match.score2}
-                        </span>
-                      </div>
-                   </div>
+                <div className="mt-2 flex items-center justify-center gap-2">
+                  <div className={`bg-slate-900 rounded-xl px-5 py-2 border-2 border-slate-700 shadow-[3px_3px_0px_0px_rgba(163,230,53,0.45)] ${
+                    match.status === 'completed' ? 'score-result-bounce' : ''
+                  }`}>
+                    <div className="font-mono text-xl sm:text-2xl font-black tracking-tight flex items-center text-white gap-2">
+                      <span className={match.status !== 'void' && match.score1 > match.score2 ? 'text-lime-400' : 'text-white/80'}>
+                        {match.score1}
+                      </span>
+                      <span className="text-slate-600 text-lg">—</span>
+                      <span className={match.status !== 'void' && match.score2 > match.score1 ? 'text-lime-400' : 'text-white/80'}>
+                        {match.score2}
+                      </span>
+                    </div>
+                  </div>
+                  {match.status === 'completed' && (
+                    <button
+                      onClick={() => shareMatch(match)}
+                      className="p-2 rounded-xl border border-slate-200 text-slate-400 hover:bg-lime-50 hover:border-lime-400 hover:text-lime-700 transition-colors"
+                      title="Share result"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
 
-                {match.status === 'completed' && formatMatchTime(match.completedAt) && (
-                  <div className="mt-3 flex justify-center">
-                    <div className="inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-orange-700">
-                      <Clock3 className="w-3 h-3" />
-                      Scored {formatMatchTime(match.completedAt)}
-                    </div>
-                  </div>
-                )}
-
-                {match.status === 'void' && (
-                  <div className="mt-3 flex justify-center">
-                    <div className="inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-orange-700">
-                      Voided {match.voidedAt ? formatMatchTime(match.voidedAt) : ''}
-                    </div>
-                  </div>
-                )}
-
-                {canManageThisMatch && (
-                  <div className="mt-4 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-center">
-                    {match.status !== 'pending' && !playoffStarted && (
-                      <button
-                        onClick={() => repeatMatch(match)}
-                        disabled={busyMatchId === match.id}
-                        className="min-h-11 rounded-xl border-2 border-slate-800 bg-white px-3 py-3 text-[10px] font-black uppercase shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {busyMatchId === match.id ? 'Working...' : 'Repeat Game'}
-                      </button>
-                    )}
-                    {match.status === 'void' ? (
-                      <button
-                        onClick={() => unvoidMatch(match)}
-                        disabled={busyMatchId === match.id}
-                        className="min-h-11 rounded-xl border-2 border-slate-800 bg-lime-400 px-3 py-3 text-[10px] font-black uppercase text-slate-900 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {busyMatchId === match.id ? 'Working...' : 'Unvoid Game'}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => voidMatch(match)}
-                        disabled={busyMatchId === match.id}
-                        className="min-h-11 rounded-xl border-2 border-slate-800 bg-orange-500 px-3 py-3 text-[10px] font-black uppercase text-white shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {busyMatchId === match.id ? 'Working...' : 'Void Game'}
-                      </button>
-                    )}
-                  </div>
-                )}
-
                 {canEditThisMatch && match.status !== 'void' && (
-                  <div className="mt-6 pt-4 border-t-2 border-dashed border-slate-200">
+                  <div className="mt-3 pt-2.5 border-t-2 border-dashed border-slate-200">
                     {isEditingThisMatch ? (
                       <div className="flex flex-col gap-4">
                         <div className="flex items-center justify-center gap-2 w-full">
                           <div className="flex flex-col items-center gap-1 flex-1">
                             <span className={`text-[10px] font-bold uppercase tracking-[0.16em] ${winnerTeam === 1 ? 'text-lime-600' : 'text-slate-400'}`}>{competitorLabel} 1</span>
-                            <input 
-                              type="number"
-                              min="0"
-                              max="20"
-                              value={score1}
-                              onChange={e => {
-                                const val = e.target.value;
-                                if (val === '' || (parseInt(val) >= 0 && parseInt(val) <= 20)) {
-                                  setScore1(val);
-                                }
-                              }}
-                              className="h-14 w-full rounded-2xl border-2 border-slate-800 bg-white text-center text-2xl font-black text-slate-900 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] focus:outline-none focus:ring-4 focus:ring-lime-200 p-0"
-                            />
+                            <div className="flex items-center gap-1 w-full">
+                              <button
+                                type="button"
+                                onClick={() => setScore1(String(Math.max(0, parseInt(score1||'0') - 1)))}
+                                className="border-2 border-slate-800 bg-white text-slate-800 font-black text-xl w-10 h-14 rounded-xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] active:translate-y-0.5 active:shadow-none transition-all shrink-0"
+                              >−</button>
+                              <input
+                                autoFocus
+                                type="number"
+                                min="0"
+                                max="20"
+                                value={score1}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  if (val === '' || (parseInt(val) >= 0 && parseInt(val) <= 20)) {
+                                    setScore1(val);
+                                  }
+                                }}
+                                className="h-14 flex-1 min-w-0 rounded-2xl border-2 border-slate-800 bg-white text-center text-2xl font-black text-slate-900 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] focus:outline-none focus:ring-4 focus:ring-lime-200 p-0"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setScore1(String(Math.min(20, parseInt(score1||'0') + 1)))}
+                                className="border-2 border-slate-800 bg-white text-slate-800 font-black text-xl w-10 h-14 rounded-xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] active:translate-y-0.5 active:shadow-none transition-all shrink-0"
+                              >+</button>
+                            </div>
                           </div>
                           <span className="mt-3 text-slate-800 font-black text-xl">:</span>
                           <div className="flex flex-col items-center gap-1 flex-1">
                             <span className={`text-[10px] font-bold uppercase tracking-[0.16em] ${winnerTeam === 2 ? 'text-orange-600' : 'text-slate-400'}`}>{competitorLabel} 2</span>
-                            <input 
-                              type="number"
-                              min="0"
-                              max="20"
-                              value={score2}
-                              onChange={e => {
-                                const val = e.target.value;
-                                if (val === '' || (parseInt(val) >= 0 && parseInt(val) <= 20)) {
-                                  setScore2(val);
-                                }
-                              }}
-                              className="h-14 w-full rounded-2xl border-2 border-slate-800 bg-white text-center text-2xl font-black text-slate-900 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] focus:outline-none focus:ring-4 focus:ring-orange-200 p-0"
-                            />
+                            <div className="flex items-center gap-1 w-full">
+                              <button
+                                type="button"
+                                onClick={() => setScore2(String(Math.max(0, parseInt(score2||'0') - 1)))}
+                                className="border-2 border-slate-800 bg-white text-slate-800 font-black text-xl w-10 h-14 rounded-xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] active:translate-y-0.5 active:shadow-none transition-all shrink-0"
+                              >−</button>
+                              <input
+                                type="number"
+                                min="0"
+                                max="20"
+                                value={score2}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  if (val === '' || (parseInt(val) >= 0 && parseInt(val) <= 20)) {
+                                    setScore2(val);
+                                  }
+                                }}
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submitScore(match); } }}
+                                className="h-14 flex-1 min-w-0 rounded-2xl border-2 border-slate-800 bg-white text-center text-2xl font-black text-slate-900 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] focus:outline-none focus:ring-4 focus:ring-orange-200 p-0"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setScore2(String(Math.min(20, parseInt(score2||'0') + 1)))}
+                                className="border-2 border-slate-800 bg-white text-slate-800 font-black text-xl w-10 h-14 rounded-xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] active:translate-y-0.5 active:shadow-none transition-all shrink-0"
+                              >+</button>
+                            </div>
                           </div>
                         </div>
                         <div className={`rounded-xl border px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] ${
@@ -834,9 +772,9 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
                         </div>
                       </div>
                     ) : (
-                      <button 
+                      <button
                         onClick={() => startEditingMatch(match)}
-                        className="w-full min-h-12 py-3 bg-lime-400 border-2 border-slate-800 rounded-xl shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] font-black text-sm flex items-center justify-center gap-2 group hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all uppercase"
+                        className="w-full min-h-12 py-3 bg-slate-900 text-lime-400 border-2 border-slate-800 rounded-xl shadow-[3px_3px_0px_0px_rgba(163,230,53,0.6)] font-black text-sm flex items-center justify-center gap-2 group hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all uppercase"
                       >
                         {match.status === 'completed' ? 'EDIT SCORE' : 'ENTER SCORE'}
                         <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -858,23 +796,13 @@ export default function MatchList({ tournamentId, tournamentName, format, matche
         });
       })()}
       {matches.length === 0 && (
-        <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white p-10 text-center">
-          <div className="w-16 h-16 bg-lime-50 rounded-2xl flex items-center justify-center mx-auto mb-6 border-2 border-lime-100">
-            <Swords className="w-8 h-8 text-lime-400" />
+        <div className="rounded-3xl border-2 border-dashed border-lime-300 bg-white/60 p-10 text-center">
+          <div className="w-16 h-16 bg-lime-400 rounded-2xl flex items-center justify-center mx-auto mb-5 border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)]">
+            <Swords className="w-8 h-8 text-slate-900" />
           </div>
-          <p className="font-black uppercase text-slate-800">No games scheduled yet</p>
+          <p className="font-black uppercase text-slate-800 text-lg">No battles yet</p>
           <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
-            Add players in Participants, then kick off the tournament.
-          </p>
-        </div>
-      )}
-      {matches.length > 0 && visibleRounds.length === 0 && (
-        <div className="p-12 text-center">
-          <div className="w-16 h-16 bg-zinc-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
-            <Swords className="w-8 h-8 text-zinc-300" />
-          </div>
-          <p className="text-zinc-400 font-medium">
-            {roundTab === 'voided' ? 'No voided rounds yet' : 'No active rounds to show'}
+            Add players in the Players tab, then start the tournament.
           </p>
         </div>
       )}

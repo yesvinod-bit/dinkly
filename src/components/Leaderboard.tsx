@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Match, Player, Session, TournamentFormat, TournamentPairingMode } from '../lib/firebase';
 import {
   filterMatchesBySession,
@@ -6,7 +6,7 @@ import {
   getTournamentFormat,
   getTournamentPairingMode
 } from '../lib/tournamentLogic';
-import { CheckSquare, Crown, Medal, PlayCircle, Sparkles, Square, Trophy, User, Users, CalendarDays } from 'lucide-react';
+import { CheckSquare, Crown, PlayCircle, Sparkles, Square, Trophy, User, Users, CalendarDays } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface Props {
@@ -135,6 +135,18 @@ export default function Leaderboard({
   const isFixedPairLeaderboard = tournamentFormat === 'doubles' && tournamentPairingMode === 'fixed';
   const isLeague = sessions.length > 0;
   const playoffStarted = matches.some((match) => match.stage === 'playoff');
+
+  const uniqueOpponents = useMemo(() => {
+    const map: Record<string, Set<string>> = {};
+    players.forEach(p => { map[p.id] = new Set(); });
+    matches.filter(m => m.status === 'completed').forEach(m => {
+      m.team1.forEach(p1 => m.team2.forEach(p2 => {
+        map[p1]?.add(p2);
+        map[p2]?.add(p1);
+      }));
+    });
+    return map;
+  }, [matches, players]);
 
   const standingsMatches = standingsView === 'session' && currentSession
     ? filterMatchesBySession(matches, currentSession)
@@ -269,8 +281,10 @@ export default function Leaderboard({
               <th className="px-3 sm:px-6 py-3 md:py-5 font-black">{competitorLabel}</th>
               <th className="px-2 sm:px-6 py-3 md:py-5 font-black text-center"><span className="sm:hidden">GP</span><span className="hidden sm:inline">Played</span></th>
               <th className="px-2 sm:px-6 py-3 md:py-5 font-black text-center"><span className="sm:hidden">W</span><span className="hidden sm:inline">Wins</span></th>
+              <th className="px-2 sm:px-4 py-3 md:py-5 font-black text-center hidden sm:table-cell">Win%</th>
               <th className="px-3 sm:px-6 py-3 md:py-5 font-black text-center">Diff</th>
               <th className="px-3 sm:px-6 py-3 md:py-5 font-black text-center hidden md:table-cell">For</th>
+              <th className="px-3 sm:px-4 py-3 md:py-5 font-black text-center hidden lg:table-cell" title="Unique opponents faced">Opp</th>
             </tr>
           </thead>
           <tbody className="divide-y-2 divide-slate-100 font-bold">
@@ -282,7 +296,12 @@ export default function Leaderboard({
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.05 }}
-                className={`${idx === 0 ? 'champion-row bg-lime-50' : 'hover:bg-zinc-50'} transition-colors`}
+                className={`transition-colors ${
+                  idx === 0 ? 'champion-row' :
+                  idx === 1 ? 'bg-slate-50/80' :
+                  idx === 2 ? 'bg-orange-50/40' :
+                  'hover:bg-zinc-50'
+                }`}
               >
                 {selectable && (
                   <td className="px-3 sm:px-6 py-3 md:py-5">
@@ -300,14 +319,15 @@ export default function Leaderboard({
                 )}
                 <td className="px-3 sm:px-6 py-3 md:py-5">
                   <div className="flex items-center gap-1.5 md:gap-2">
-                    {idx === 0 && (
-                      <span className="champion-medal relative inline-flex">
-                        <Medal className="w-4 h-4 md:w-5 md:h-5 text-orange-500 shrink-0" />
-                      </span>
+                    {idx === 0 ? (
+                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-amber-400 border-2 border-slate-800 font-mono text-xs font-black text-slate-900 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]">1</span>
+                    ) : idx === 1 ? (
+                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-slate-300 border-2 border-slate-800 font-mono text-xs font-black text-slate-900 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]">2</span>
+                    ) : idx === 2 ? (
+                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-orange-300 border-2 border-slate-800 font-mono text-xs font-black text-slate-900 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]">3</span>
+                    ) : (
+                      <span className="font-mono text-sm md:text-lg text-slate-400 font-bold">#{idx + 1}</span>
                     )}
-                    <span className={`font-mono text-sm md:text-lg ${idx === 0 ? 'text-lime-600 font-black' : 'text-slate-400 font-bold'}`}>
-                      #{idx + 1}
-                    </span>
                   </div>
                 </td>
                 <td className="px-3 sm:px-6 py-3 md:py-5">
@@ -328,11 +348,26 @@ export default function Leaderboard({
                 </td>
                 <td className="px-2 sm:px-6 py-3 md:py-5 text-center text-xs md:text-lg text-slate-600 italic">{standing.gamesPlayed}</td>
                 <td className="px-2 sm:px-6 py-3 md:py-5 text-center font-black text-lg md:text-2xl text-slate-800">{standing.wins}</td>
+                <td className="px-2 sm:px-4 py-3 md:py-5 text-center font-black text-sm md:text-base text-slate-500 hidden sm:table-cell">
+                  {standing.gamesPlayed > 0 ? `${Math.round((standing.wins / standing.gamesPlayed) * 100)}%` : '—'}
+                </td>
                 <td className={`px-3 sm:px-6 py-3 md:py-5 text-center font-mono text-lg md:text-2xl font-black ${standing.pointDiff >= 0 ? 'text-orange-500' : 'text-slate-400'}`}>
                   {standing.pointDiff >= 0 ? `+${standing.pointDiff}` : standing.pointDiff}
                 </td>
                 <td className="px-3 sm:px-6 py-3 md:py-5 text-center font-mono text-sm md:text-lg text-slate-500 hidden md:table-cell">
                   {standing.pointsFor}
+                </td>
+                <td className="px-3 sm:px-4 py-3 md:py-5 text-center hidden lg:table-cell">
+                  {(() => {
+                    const opp = uniqueOpponents[standing.id]?.size ?? 0;
+                    const max = players.length - 1;
+                    const full = opp >= max && max > 0;
+                    return (
+                      <span className={`inline-flex items-center justify-center rounded-lg px-2 py-0.5 text-xs font-black ${full ? 'bg-lime-100 text-lime-700' : 'text-slate-400'}`}>
+                        {opp}/{max}
+                      </span>
+                    );
+                  })()}
                 </td>
               </motion.tr>
             );})}

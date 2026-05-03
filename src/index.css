@@ -6,30 +6,36 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
-  @apply bg-lime-50 text-slate-900 font-sans min-h-screen;
+  @apply text-slate-900 font-sans min-h-screen;
+  background: linear-gradient(160deg, #f7fee7 0%, #fefce8 60%, #f0fdf4 100%);
+  background-attachment: fixed;
   color-scheme: light;
 }
 
 @layer components {
   .brutal-card {
-    @apply bg-white border-2 border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] rounded-2xl md:shadow-[5px_5px_0px_0px_rgba(30,41,59,1)];
+    @apply bg-white border-2 md:border-[3px] border-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] rounded-2xl md:shadow-[5px_5px_0px_0px_rgba(30,41,59,1)];
   }
-  
+
   .brutal-button-orange {
-    @apply bg-orange-500 text-white font-black px-4 py-2 rounded-xl border-2 border-slate-800 shadow-[2px_2px_0px_0px_rgba(194,65,12,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all md:px-5 md:py-3 md:rounded-2xl md:shadow-[3px_3px_0px_0px_rgba(194,65,12,1)];
+    @apply bg-orange-500 text-white font-black px-4 py-2 rounded-xl border-2 border-slate-800 shadow-[2px_2px_0px_0px_rgba(194,65,12,1)] hover:-translate-y-0.5 hover:shadow-[3px_3px_0px_0px_rgba(194,65,12,1)] active:translate-y-0.5 active:shadow-none transition-all duration-150 md:px-5 md:py-3 md:rounded-2xl md:shadow-[3px_3px_0px_0px_rgba(194,65,12,1)];
   }
 
   .brutal-button-lime {
-    @apply bg-lime-400 text-slate-900 font-black px-4 py-2 rounded-xl border-2 border-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all md:px-5 md:py-3 md:rounded-2xl md:shadow-[3px_3px_0px_0px_rgba(30,41,59,1)];
+    @apply bg-lime-400 text-slate-900 font-black px-4 py-2 rounded-xl border-2 border-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:-translate-y-0.5 hover:shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] active:translate-y-0.5 active:shadow-none transition-all duration-150 md:px-5 md:py-3 md:rounded-2xl md:shadow-[3px_3px_0px_0px_rgba(30,41,59,1)];
   }
 
   .brutal-input {
-    @apply bg-white border-2 border-slate-800 rounded-xl px-3 py-2 outline-none focus:ring-2 ring-lime-400 text-slate-800 font-bold placeholder-slate-300 md:rounded-2xl md:px-4 md:py-3;
+    @apply bg-white border-2 border-slate-800 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-offset-1 ring-lime-400 text-slate-800 font-bold placeholder-slate-300 md:rounded-2xl md:px-4 md:py-3 transition-shadow;
   }
 
   .status-pill {
-    @apply inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em];
+    @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10px] font-black uppercase tracking-[0.14em];
   }
 }
 

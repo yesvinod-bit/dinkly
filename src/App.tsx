@@ -141,27 +141,89 @@ const LOGIN_SESSION_PREFIX = 'dinkly:login-recorded:';
 const PROFILE_ADVICE_REFRESH_MS = 20_000;
 
 const tournamentNameOpeners = [
-  'Dink & Dash',
-  'Kitchen Chaos',
-  'Paddle Party',
-  'Net Results',
-  'Court Jesters',
-  'Drop Shot Social',
-  'Rally Club',
-  'Pickle Panic',
-  'Third Shot Throwdown',
-  'Lob Mob',
-  'Dink Dynasty',
-  'No Volley Zone',
+  // Hollywood Pickleball Puns
+  'The Dink Knight Rises',
+  'Paddle Hard With a Vengeance',
+  'Mission: Impickable',
+  'No Volley Zone Strikes Back',
+  'The Dinkinator',
+  'Pickel Fiction',
+  'Die Dink',
+  'The Lob Supremacy',
+  'Smash & Furious',
+  'Court of the Rings',
+  'Smashing Nemo',
+  'Forrest Dink',
+  'The Hunger Dinks',
+  'Jurassic Paddle',
+  'Serving Private Ryan',
+  'The Dink Panther',
+  'Kitchen Impossible',
+  'Top Dink',
+  'Dink Actually',
+  'The Paddlefather',
+  'Dinkception',
+  'Kill Bill: Vol Ley',
+  'The Sixth Smash',
+  'Lob Story',
+  'The Grand Kitchen Open',
+  'Home Aloon',
+  'Dirty Dinkin',
+  'The Good the Bad and the Dinky',
+  'Dink to the Future',
+  'The Wizard of Lobs',
+  'Paddle Club',
+  'A Few Good Dinks',
+  'There Will Be Dinks',
+  'Mad Paddle: Fury Court',
+  'The Dink Must Go On',
+  // Bollywood Pickleball Puns
+  'Dilwale Pickle Le Jayenge',
+  'Kal Ho Na Court',
+  '3 Idiots on the Court',
+  'Sholay Smashdown',
+  'Kabhi Kitchen Kabhi Court',
+  'Gully Dinkly',
+  'Student of the Court',
+  'Hum Dink Hai Raahi',
+  'Paddlebaaz',
+  'PK: Pickleball King',
+  'Dangal Court Edition',
+  'Dil Toh Dinkly Hai Ji',
+  'Kuch Kuch Dinkta Hai',
+  'Baahubali: The Kitchen Battle',
+  'Zindagi Na Milegi Dobara Rematch',
+  'Bhaag Dink Bhaag',
+  'Queen of the Kitchen',
+  'Dinkwale Dulhania',
+  'Main Hoon Dinkmaster',
+  'Dink Pe Dink',
 ];
 
-function buildSuggestedTournamentName(date = new Date()) {
-  const dateLabel = date.toLocaleDateString([], {
-    month: 'short',
-    day: 'numeric',
-  });
-  const opener = tournamentNameOpeners[Math.floor(Math.random() * tournamentNameOpeners.length)];
-  return `${dateLabel} ${opener}`;
+const tournamentNameSuffixes = [
+  'Season 2',
+  'The Sequel',
+  'Returns',
+  'The Revenge',
+  'Reloaded',
+  'Part II',
+  'The Reckoning',
+  'Uncut',
+  'Director\'s Cut',
+  'Remastered',
+  'The Final Chapter',
+  'Begins',
+  'Forever',
+  'vs Everyone',
+  'Extended Edition',
+];
+
+function buildSuggestedTournamentName(_date = new Date()) {
+  const title = tournamentNameOpeners[Math.floor(Math.random() * tournamentNameOpeners.length)];
+  const addSuffix = Math.random() < 0.4;
+  if (!addSuffix) return title;
+  const suffix = tournamentNameSuffixes[Math.floor(Math.random() * tournamentNameSuffixes.length)];
+  return `${title}: ${suffix}`;
 }
 
 function getSharedTournamentIdFromInput(value: string) {
@@ -842,51 +904,59 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-lime-50 p-4">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-md w-full brutal-card p-8 text-center"
+      <div className="min-h-screen flex flex-col items-center justify-center p-4" style={{ background: 'linear-gradient(160deg, #ecfccb 0%, #fef9c3 55%, #dcfce7 100%)' }}>
+        <motion.div
+          initial={{ opacity: 0, y: 24, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ type: 'spring', stiffness: 340, damping: 26 }}
+          className="max-w-sm w-full"
         >
-          <div className="mb-6 flex justify-center">
-            <BrandMark size="lg" />
-          </div>
-          <h1 className="text-4xl font-black text-lime-950 tracking-tight mb-2 uppercase">
-            Dink<span className="text-orange-500">ly</span>
-          </h1>
-          <p className="text-lime-700 font-bold uppercase text-xs tracking-[0.24em] mb-2">
-            Round Robin Mixer
-          </p>
-          <p className="mb-8 text-sm font-bold text-slate-600">
-            Live pairings, fast score entry, and a courtside view that feels like an app.
-          </p>
-          <button
-            onClick={handleSignIn}
-            className="w-full brutal-button-orange flex items-center justify-center gap-3 text-lg"
-          >
-            CONTINUE WITH GOOGLE
-            <ChevronRight className="w-5 h-5" />
-          </button>
-          <p className="mt-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
-            Google sign-in is required for everyone.
-          </p>
-          {deferredInstallPrompt && !isAppInstalled && (
-            <button
-              type="button"
-              onClick={handleInstallApp}
-              className="mt-4 w-full rounded-2xl border-2 border-slate-800 bg-white px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] transition-all hover:translate-y-0.5 active:translate-y-1 active:shadow-none"
-            >
-              <span className="inline-flex items-center justify-center gap-2">
-                <Download className="h-4 w-4" />
-                Install Dinkly
-              </span>
-            </button>
-          )}
-          {authError && (
-            <div className="mt-4 bg-orange-50 border-2 border-orange-200 text-orange-700 px-4 py-3 rounded-xl font-bold text-sm text-left">
-              {authError}
+          <div className="brutal-card p-7 text-center">
+            <div className="mb-5 flex justify-center">
+              <BrandMark size="lg" />
             </div>
-          )}
+            <h1 className="text-5xl font-black text-lime-950 tracking-tight mb-1 uppercase leading-none">
+              Dink<span className="text-orange-500">ly</span>
+            </h1>
+            <p className="text-lime-700 font-black uppercase text-[10px] tracking-[0.28em] mb-4">
+              Pickleball Round Robin Mixer
+            </p>
+            <div className="mb-6 rounded-2xl border-2 border-dashed border-lime-300 bg-lime-50 px-4 py-3">
+              <p className="text-sm font-bold text-slate-600 leading-relaxed">
+                Smart pairings, fast score entry, live standings — the nerdiest way to run your pickleball mixer.
+              </p>
+            </div>
+            <button
+              onClick={handleSignIn}
+              className="w-full brutal-button-orange flex items-center justify-center gap-3 text-base py-3.5"
+            >
+              CONTINUE WITH GOOGLE
+              <ChevronRight className="w-5 h-5" />
+            </button>
+            <p className="mt-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+              Google account required
+            </p>
+            {deferredInstallPrompt && !isAppInstalled && (
+              <button
+                type="button"
+                onClick={handleInstallApp}
+                className="mt-3 w-full rounded-2xl border-2 border-slate-800 bg-white px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-slate-800 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] transition-all hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-none duration-150"
+              >
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Download className="h-4 w-4" />
+                  Install App
+                </span>
+              </button>
+            )}
+            {authError && (
+              <div className="mt-4 bg-orange-50 border-2 border-orange-200 text-orange-700 px-4 py-3 rounded-xl font-bold text-sm text-left">
+                {authError}
+              </div>
+            )}
+          </div>
+          <p className="mt-4 text-center text-[10px] font-black uppercase tracking-widest text-lime-700/60">
+            🏓 Dink. Score. Repeat.
+          </p>
         </motion.div>
       </div>
     );
@@ -936,7 +1006,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-lime-50 p-3 pb-24 transition-colors md:p-8">
+    <div className="min-h-screen p-3 pb-24 transition-colors md:p-8">
       {/* Notifications Overlay */}
       <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
         <AnimatePresence>
@@ -970,68 +1040,66 @@ export default function App() {
       </div>
 
       <div className="max-w-3xl mx-auto">
-        <header className="mb-5 rounded-2xl border-2 border-slate-800 bg-white/95 p-3 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] backdrop-blur md:mb-8 md:p-5">
-          <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-3">
+        <header className="mb-5 overflow-hidden rounded-2xl border-2 border-slate-800 bg-slate-900 shadow-[4px_4px_0px_0px_rgba(163,230,53,0.6)] md:mb-8">
+          <div className="flex items-center justify-between gap-3 px-4 py-3 md:px-5 md:py-4">
+            <div className="flex items-center gap-3 min-w-0">
               <BrandMark size="sm" />
-              <div>
-                <h1 className="text-xl md:text-3xl font-black text-lime-900 tracking-tight uppercase leading-none">
-                  {isAdminMode ? 'Admin Central' : 'Dinkly'}
+              <div className="min-w-0">
+                <h1 className="text-xl md:text-3xl font-black tracking-tight uppercase leading-none text-white">
+                  {isAdminMode ? 'Admin Central' : <><span>Dink</span><span className="text-lime-400">ly</span></>}
                 </h1>
-                <p className="mt-1 text-[8px] md:text-[10px] font-black uppercase tracking-[0.22em] text-lime-700">
-                  {isAdminMode ? 'Control Room' : 'Pickleball Mixer'}
+                <p className="mt-0.5 text-[9px] font-black uppercase tracking-[0.22em] text-lime-400/70">
+                  {isAdminMode ? 'Control Room' : getUserLabel(user)}
                 </p>
               </div>
             </div>
-            <p className="mt-2 text-lime-700 font-bold uppercase text-[8px] md:text-[10px] tracking-widest">
-              Active Player: {getUserLabel(user)}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                setHomeView('profile');
-                setIsPlayerProfileOpen(true);
-              }}
-              className={`p-2 md:p-3 border-2 md:border-4 border-slate-800 rounded-xl md:rounded-2xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] md:shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] transition-all ${
-                homeView === 'profile' || isPlayerProfileOpen ? 'bg-sky-400 text-slate-900' : 'bg-white text-slate-800'
-              }`}
-              title="My Profile"
-            >
-              <BadgeCheck className="w-4 h-4 md:w-5 md:h-5" />
-            </button>
-            {user.email === adminEmail && (
-              <button 
+            <div className="flex items-center gap-2 shrink-0">
+              <button
                 onClick={() => {
-                  setIsAdminMode(!isAdminMode);
-                  setHomeView('home');
+                  setHomeView('profile');
+                  setIsPlayerProfileOpen(true);
                 }}
-                className={`p-2 md:p-3 border-2 md:border-4 border-slate-800 rounded-xl md:rounded-2xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] md:shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all ${
-                  isAdminMode ? 'bg-orange-400 text-white' : 'bg-white text-slate-800'
+                className={`p-2 md:p-2.5 border-2 border-slate-600 rounded-xl transition-all duration-150 ${
+                  homeView === 'profile' || isPlayerProfileOpen
+                    ? 'bg-sky-400 border-sky-400 text-slate-900'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
                 }`}
-                title="Admin"
+                title="My Profile"
               >
-                <Shield className="w-4 h-4 md:w-5 md:h-5" />
+                <BadgeCheck className="w-4 h-4 md:w-5 md:h-5" />
               </button>
-            )}
-            <button 
-              onClick={logout}
-              title="Sign out"
-              className="p-2 md:p-3 bg-white border-2 md:border-4 border-slate-800 rounded-xl md:rounded-2xl shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] md:shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] text-slate-800 hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all"
-            >
-              <LogOut className="w-4 h-4 md:w-5 md:h-5" />
-            </button>
+              {user.email === adminEmail && (
+                <button
+                  onClick={() => {
+                    setIsAdminMode(!isAdminMode);
+                    setHomeView('home');
+                  }}
+                  className={`p-2 md:p-2.5 border-2 rounded-xl transition-all duration-150 ${
+                    isAdminMode
+                      ? 'bg-orange-500 border-orange-500 text-white'
+                      : 'bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white'
+                  }`}
+                  title="Admin"
+                >
+                  <Shield className="w-4 h-4 md:w-5 md:h-5" />
+                </button>
+              )}
+              <button
+                onClick={logout}
+                title="Sign out"
+                className="p-2 md:p-2.5 bg-slate-800 border-2 border-slate-600 rounded-xl text-slate-400 hover:bg-slate-700 hover:text-white transition-all duration-150"
+              >
+                <LogOut className="w-4 h-4 md:w-5 md:h-5" />
+              </button>
+            </div>
           </div>
-          </div>
-
           {!isAdminMode && (
-            <div className="mt-4 grid grid-cols-3 gap-2 md:hidden">
+            <div className="grid grid-cols-3 gap-0 border-t-2 border-slate-700 md:hidden">
               {[
                 { key: 'home', label: 'Home', icon: Home },
                 { key: 'activity', label: 'Activity', icon: Activity },
                 { key: 'profile', label: 'Profile', icon: BadgeCheck },
-              ].map((item) => {
+              ].map((item, i) => {
                 const Icon = item.icon;
                 const isActive = homeView === item.key;
                 return (
@@ -1042,11 +1110,15 @@ export default function App() {
                       setHomeView(item.key as typeof homeView);
                       setIsPlayerProfileOpen(item.key === 'profile');
                     }}
-                    className={`flex min-h-11 items-center justify-center gap-2 rounded-xl border-2 border-slate-800 text-[10px] font-black uppercase ${
-                      isActive ? 'bg-lime-400 text-slate-900' : 'bg-white text-slate-700'
+                    className={`flex items-center justify-center gap-2 py-2.5 text-[10px] font-black uppercase tracking-wide transition-all duration-150 ${
+                      i > 0 ? 'border-l-2 border-slate-700' : ''
+                    } ${
+                      isActive
+                        ? 'bg-lime-400 text-slate-900'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
                     }`}
                   >
-                    <Icon className="h-4 w-4" />
+                    <Icon className="h-3.5 w-3.5" />
                     {item.label}
                   </button>
                 );
@@ -1445,9 +1517,24 @@ export default function App() {
                         </div>
                       </div>
                     )}
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <span className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-600">Name</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setNewTourneyName(buildSuggestedTournamentName());
+                        }}
+                        className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-800 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.12em] text-lime-300 hover:bg-slate-700 transition-colors"
+                        title="Suggest a movie name"
+                      >
+                        <Sparkles className="h-2.5 w-2.5" />
+                        Movie name
+                      </button>
+                    </div>
                     <div className="flex flex-col sm:flex-row items-center gap-2 md:gap-3">
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         value={newTourneyName}
                         onChange={(e) => setNewTourneyName(e.target.value)}
                         placeholder={buildSuggestedTournamentName()}
@@ -1455,17 +1542,6 @@ export default function App() {
                         className="brutal-input w-full text-sm md:text-base"
                       />
                       <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setNewTourneyName(buildSuggestedTournamentName());
-                        }}
-                        className="flex min-h-12 w-full items-center justify-center rounded-xl border-2 border-slate-800 bg-white px-3 text-[10px] font-black uppercase text-slate-700 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] sm:w-auto"
-                        title="Suggest a new name"
-                      >
-                        <RefreshCw className="h-4 w-4" />
-                      </button>
-                      <button 
                         onClick={(e) => { e.stopPropagation(); createTournament(); }}
                         className="w-full sm:w-auto brutal-button-orange text-sm"
                       >
@@ -1550,8 +1626,10 @@ export default function App() {
               {(homeView === 'activity' || (homeView === 'home' && history.length > 0)) && history.length > 0 && (
                 <div className="mt-8 md:mt-12">
                   <div className="mb-4 md:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <h2 className="text-lg md:text-2xl font-black text-slate-800 flex items-center gap-3 italic">
-                      <History className="w-5 h-5 md:w-6 md:h-6 text-lime-600" />
+                    <h2 className="text-lg md:text-2xl font-black text-slate-800 flex items-center gap-2.5">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-lime-400 border-2 border-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]">
+                        <History className="w-4 h-4 text-slate-900" />
+                      </span>
                       RECENT ACTIVITY
                     </h2>
                     <div className="flex flex-wrap gap-2">
@@ -1594,7 +1672,7 @@ export default function App() {
                     {history.map((item) => (
                       <motion.div
                         key={item.id}
-                        whileHover={{ x: 4 }}
+                        whileHover={{ x: 3, transition: { duration: 0.12 } }}
                         onClick={() => {
                           if (isHistorySelectionMode) {
                             toggleHistorySelection(item.id);
@@ -1602,9 +1680,14 @@ export default function App() {
                           }
                           setActiveTournamentId(item.id);
                         }}
-                        className="bg-white border-2 md:border-4 border-slate-800 rounded-2xl md:rounded-3xl p-4 md:p-6 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] md:shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] cursor-pointer flex items-center justify-between group"
+                        className={`relative overflow-hidden bg-white border-2 md:border-[3px] border-slate-800 rounded-2xl md:rounded-3xl p-3.5 md:p-5 cursor-pointer flex items-center justify-between group transition-all duration-150 ${
+                          item.role === 'owner'
+                            ? 'shadow-[4px_4px_0px_0px_rgba(249,115,22,0.8)] md:shadow-[5px_5px_0px_0px_rgba(249,115,22,0.8)]'
+                            : 'shadow-[4px_4px_0px_0px_rgba(163,230,53,0.9)] md:shadow-[5px_5px_0px_0px_rgba(163,230,53,0.9)]'
+                        }`}
                       >
-                        <div className="flex items-center gap-3 md:gap-4">
+                        <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl ${item.role === 'owner' ? 'bg-orange-500' : 'bg-lime-400'}`} />
+                        <div className="flex items-center gap-3 md:gap-4 pl-2">
                           {isHistorySelectionMode && (
                             <button
                               type="button"
@@ -1617,13 +1700,13 @@ export default function App() {
                               {selectedHistoryIds.includes(item.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                             </button>
                           )}
-                          <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl border-2 border-slate-800 flex items-center justify-center shadow-[1.5px_1.5px_0px_0px_rgba(30,41,59,1)] md:shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] ${
-                            item.role === 'owner' ? 'bg-orange-100' : 'bg-lime-100'
+                          <div className={`w-10 h-10 md:w-11 md:h-11 rounded-xl border-2 border-slate-800 flex items-center justify-center shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] shrink-0 ${
+                            item.role === 'owner' ? 'bg-orange-500' : 'bg-lime-400'
                           }`}>
-                            {item.role === 'owner' ? <Plus className="w-5 h-5 md:w-6 md:h-6 text-orange-600" /> : <Users className="w-5 h-5 md:w-6 md:h-6 text-lime-600" />}
+                            {item.role === 'owner' ? <Plus className="w-5 h-5 text-white" /> : <Users className="w-5 h-5 text-slate-900" />}
                           </div>
-                          <div>
-                            <h3 className="font-black text-sm md:text-base text-slate-800 uppercase tracking-tight leading-tight">{item.name}</h3>
+                          <div className="min-w-0">
+                            <h3 className="font-black text-sm md:text-base text-slate-800 uppercase tracking-tight leading-tight truncate">{item.name}</h3>
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
                               <span className="text-[8px] md:text-[10px] font-mono font-black text-slate-400 bg-slate-50 px-1.5 rounded border border-slate-100 uppercase">
                                 {item.code}
@@ -1641,7 +1724,7 @@ export default function App() {
                           </div>
                         </div>
                         {!isHistorySelectionMode && (
-                          <ChevronRight className="w-5 h-5 md:w-6 md:h-6 text-slate-300 group-hover:text-slate-800 transition-colors" />
+                          <ChevronRight className="w-5 h-5 shrink-0 text-slate-300 group-hover:text-slate-700 transition-colors" />
                         )}
                       </motion.div>
                     ))}
@@ -1652,10 +1735,10 @@ export default function App() {
           )}
         </Suspense>
         {!isAdminMode && (
-          <nav className="fixed inset-x-3 bottom-3 z-50 mx-auto grid max-w-sm grid-cols-3 gap-2 rounded-2xl border-2 border-slate-800 bg-white/95 p-2 shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] backdrop-blur md:hidden">
+          <nav className="fixed inset-x-3 bottom-3 z-50 mx-auto grid max-w-sm grid-cols-3 gap-1.5 rounded-2xl border-2 border-slate-800 bg-slate-900 p-1.5 shadow-[4px_4px_0px_0px_rgba(163,230,53,0.5)] md:hidden">
             {[
               { key: 'home', label: 'Home', icon: Home },
-              { key: 'activity', label: 'Active', icon: Activity },
+              { key: 'activity', label: 'Activity', icon: Activity },
               { key: 'profile', label: 'Profile', icon: BadgeCheck },
             ].map((item) => {
               const Icon = item.icon;
@@ -1668,8 +1751,10 @@ export default function App() {
                     setHomeView(item.key as typeof homeView);
                     setIsPlayerProfileOpen(item.key === 'profile');
                   }}
-                  className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl text-[9px] font-black uppercase ${
-                    isActive ? 'bg-lime-400 text-slate-900' : 'text-slate-500'
+                  className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl text-[9px] font-black uppercase tracking-wide transition-all duration-150 ${
+                    isActive
+                      ? 'bg-lime-400 text-slate-900 shadow-[0_2px_8px_rgba(163,230,53,0.4)]'
+                      : 'text-slate-400 hover:text-white'
                   }`}
                 >
                   <Icon className="h-4 w-4" />

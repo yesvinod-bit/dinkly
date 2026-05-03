@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dinkly-shell-v2';
+const CACHE_NAME = 'dinkly-shell-v3';
 const APP_SHELL = [
   '/',
   '/manifest.json',

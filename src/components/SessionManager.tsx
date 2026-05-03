@@ -77,6 +77,7 @@ export default function SessionManager({
   const minimumActiveCount = isFixedPairMode ? 2 : getMinimumPlayers(tournamentFormat);
   const hasEnoughPlayers = isFixedPairMode ? playingPairCount >= 2 : activePlayerCount >= minimumActiveCount;
   const canStart = allowBelowMinimum || hasEnoughPlayers;
+  const isRosterUpdate = Boolean(initialAbsences || heading);
   const modeLabel = tournamentFormat === 'singles'
     ? 'Singles'
     : isFixedPairMode
@@ -100,7 +101,7 @@ export default function SessionManager({
             className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border-2 border-slate-800 transition-colors ${
               isAbsent ? 'bg-orange-400 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'
             }`}
-            title={isAbsent ? 'Mark present' : 'Mark absent'}
+            title={isAbsent ? 'Mark back in' : 'Mark out'}
           >
             {isAbsent ? <UserMinus className="h-3.5 w-3.5" /> : <UserCheck className="h-3.5 w-3.5" />}
           </button>
@@ -108,7 +109,7 @@ export default function SessionManager({
             {player.name}
           </span>
           {isAbsent && (
-            <span className="shrink-0 text-[9px] font-bold uppercase text-orange-500">absent</span>
+            <span className="shrink-0 text-[9px] font-bold uppercase text-orange-500">out</span>
           )}
         </div>
         {isAbsent && (
@@ -117,7 +118,7 @@ export default function SessionManager({
               type="text"
               value={subName}
               onChange={(e) => setSubName(player.id, e.target.value)}
-              placeholder="Sub name (leave blank to sit out)"
+              placeholder={isRosterUpdate ? 'Sub name (optional)' : 'Sub name (blank means sitting out)'}
               className="w-full rounded-lg border-2 border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 placeholder:text-slate-300 focus:border-slate-800 focus:outline-none"
             />
           </div>
@@ -146,7 +147,9 @@ export default function SessionManager({
               <CalendarDays className="h-5 w-5 text-slate-900" />
             </div>
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-lime-700">Session</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-lime-700">
+                {isRosterUpdate ? 'Current Round' : 'Session'}
+              </p>
               <h2 className="text-lg font-black uppercase leading-tight text-slate-900">
                 {heading || `Start Session ${sessionNumber}`}
               </h2>
@@ -162,7 +165,7 @@ export default function SessionManager({
           </button>
         </div>
 
-        <div className="mt-4">
+        <div className={`mt-4 ${isRosterUpdate ? 'hidden' : ''}`}>
           <label className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-600">Session Name</label>
           <input
             type="text"
@@ -175,8 +178,13 @@ export default function SessionManager({
 
         <div className="mt-4">
           <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-600">
-            Roster — mark absent players
+            {isRosterUpdate ? 'Tap a player to mark them out' : 'Roster — mark players out'}
           </p>
+          {isRosterUpdate && (
+            <p className="mt-1 text-[11px] font-bold leading-snug text-slate-500">
+              Pending games with this player will be voided and rebuilt. Add a sub name to fill the spot instead.
+            </p>
+          )}
           <div className="mt-2 max-h-64 space-y-2 overflow-y-auto">
             <AnimatePresence initial={false}>
               {isFixedPairMode ? fixedPairs.map((pair) => {

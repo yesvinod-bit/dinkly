@@ -210,6 +210,17 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
     <div className="space-y-8">
       <div className="brutal-card p-6 sm:p-8">
         <h2 className="text-2xl font-black mb-2 text-slate-800 uppercase italic">RECRUIT PLAYERS</h2>
+        <div className="flex items-center gap-3 mt-2 mb-1">
+          <div className="flex-1 h-2 rounded-full bg-slate-100 border border-slate-200 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${players.length >= minimumPlayers ? 'bg-lime-400' : 'bg-orange-400'}`}
+              style={{ width: `${Math.min(100, (players.length / minimumPlayers) * 100)}%` }}
+            />
+          </div>
+          <span className={`text-[10px] font-black uppercase tracking-[0.14em] ${players.length >= minimumPlayers ? 'text-lime-600' : 'text-slate-500'}`}>
+            {players.length}/{minimumPlayers}
+          </span>
+        </div>
         <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest mb-6">
           Setup Phase: Add at least {minimumPlayers} participants for {tournamentFormat}
         </p>
@@ -429,14 +440,14 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
         )}
 
         {status === 'setup' && isOwner && (
-          <button 
+          <button
             onClick={onStart}
             disabled={!canStartTournament}
-            className={`w-full flex items-center justify-center gap-3 text-xl py-5 transition-all ${
+            className={
               canStartTournament
-              ? 'brutal-button-orange' 
-              : 'bg-slate-50 border-4 border-slate-100 text-slate-300 rounded-2xl cursor-not-allowed font-black uppercase'
-            }`}
+                ? 'w-full flex items-center justify-center gap-3 text-xl py-5 bg-orange-500 text-white font-black rounded-2xl border-2 border-slate-800 shadow-[4px_4px_0px_0px_rgba(163,230,53,0.8)] score-pulse-pill transition-all hover:-translate-y-0.5 active:translate-y-0.5'
+                : 'w-full flex items-center justify-center gap-3 text-xl py-5 bg-slate-100 border-4 border-slate-200 text-slate-300 rounded-2xl cursor-not-allowed font-black uppercase'
+            }
           >
             <PlayCircle className="w-6 h-6" />
             {`KICK OFF TOURNAMENT (${players.length}/${minimumPlayers}+ READY)`}
@@ -456,8 +467,10 @@ export default function PlayerManager({ tournamentId, players, format, pairingMo
               className="bg-white border-2 border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-[3px_3px_0px_0px_rgba(30,41,59,1)]"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-lime-100 flex items-center justify-center border-2 border-slate-800">
-                  <UserPlus className="w-5 h-5 text-lime-600" />
+                <div className={`w-10 h-10 rounded-xl border-2 border-slate-800 flex items-center justify-center font-black text-sm shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] shrink-0 ${
+                  p.claimedByUserId ? 'bg-sky-400 text-slate-900' : 'bg-lime-400 text-slate-900'
+                }`}>
+                  {p.name.trim().split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2)}
                 </div>
                 <div>
                   <span className="flex items-center gap-1.5 font-black text-slate-800 uppercase tracking-tight">

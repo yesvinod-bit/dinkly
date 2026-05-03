@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import QRCode from 'qrcode';
 import {
   doc,
@@ -125,6 +125,22 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   const [sessions, setSessions] = useState<Session[]>([]);
   const [isSessionManagerOpen, setIsSessionManagerOpen] = useState(false);
   const [sessionManagerMode, setSessionManagerMode] = useState<'new' | 'adjust'>('new');
+  const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+
+  const uniqueOpponents = useMemo(() => {
+    const map: Record<string, Set<string>> = {};
+    players.forEach(p => { map[p.id] = new Set(); });
+    matches.filter(m => m.status === 'completed').forEach(m => {
+      m.team1.forEach(p1 => m.team2.forEach(p2 => {
+        map[p1]?.add(p2);
+        map[p2]?.add(p1);
+      }));
+    });
+    return map;
+  }, [matches, players]);
   const [isStartingSession, setIsStartingSession] = useState(false);
 
   useEffect(() => {
@@ -707,7 +723,7 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
   if (loading) return null;
 
   return (
-    <div className="min-h-screen bg-lime-50 flex flex-col">
+    <div className="min-h-screen flex flex-col" style={{ background: 'linear-gradient(160deg, #f7fee7 0%, #fefce8 60%, #f0fdf4 100%)' }}>
       <div className="pointer-events-none fixed right-3 top-3 z-[220] flex w-[min(360px,calc(100vw-24px))] flex-col gap-2">
         <AnimatePresence>
           {scoreNotifications.map((notification) => (
@@ -747,37 +763,90 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
           ))}
         </AnimatePresence>
       </div>
-      <header className="bg-white border-b-4 border-slate-800 p-4 sticky top-0 z-50">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button onClick={onBack} className="p-1.5 md:p-2 border-2 border-slate-800 rounded-lg md:rounded-xl hover:bg-lime-100 transition-colors">
+      <header className="bg-slate-900 border-b-[3px] border-slate-700 px-3 py-2.5 md:px-5 md:py-3 sticky top-0 z-50 backdrop-blur">
+        <div className="max-w-4xl mx-auto flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 md:gap-4 min-w-0">
+            <button onClick={onBack} className="shrink-0 p-1.5 md:p-2 border-2 border-slate-600 rounded-lg md:rounded-xl bg-slate-800 hover:bg-slate-700 text-white transition-colors">
               <ChevronLeft className="w-4 h-4 md:w-5 md:h-5" />
             </button>
-            <div>
-              <h1 className="text-lg md:text-2xl font-black text-lime-900 tracking-tight leading-none uppercase truncate max-w-[150px] md:max-w-none">{tournament?.name}</h1>
-              <div className="flex items-center gap-2 mt-1">
-                <div className="bg-white border-2 border-lime-400 rounded-lg px-2 py-0.5 flex items-center shadow-[1.5px_1.5px_0px_0px_rgba(163,230,53,1)]">
-                   <span className="text-[8px] font-bold text-lime-600 uppercase mr-1">CODE:</span>
-                   <span className="text-xs font-mono font-black text-slate-800">{tournament?.code}</span>
-                </div>
+            <div className="min-w-0">
+              <h1 className="text-base md:text-xl font-black text-white tracking-tight leading-none uppercase truncate max-w-[160px] sm:max-w-xs md:max-w-none">{tournament?.name}</h1>
+              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                <button
+                  onClick={() => setIsCodeModalOpen(true)}
+                  className="font-mono text-[10px] font-black text-lime-400 bg-slate-800 border border-slate-600 px-1.5 py-0.5 rounded-md hover:bg-slate-700 hover:border-lime-500 hover:text-lime-300 transition-colors cursor-pointer"
+                  title="Show join code"
+                >
+                  {tournament?.code}
+                </button>
                 <TournamentStatusPill status={tournament?.status} readOnly={readOnly} />
-                <span className="inline-flex items-center gap-1 rounded-md border border-orange-300 bg-orange-100 px-2 py-0.5 text-[8px] font-black uppercase text-orange-700">
+                <span className="inline-flex items-center gap-1 rounded-full border border-orange-700/50 bg-orange-500/20 px-2 py-0.5 text-[8px] font-black uppercase text-orange-300">
                   <span>{tournamentFormatTag.label}</span>
-                  <span className="text-orange-500">•</span>
+                  <span className="text-orange-500">·</span>
                   <span>{tournamentFormatTag.detail}</span>
                 </span>
               </div>
             </div>
           </div>
-          <button 
+          <button
             onClick={() => setIsJoinPanelOpen(true)}
-            className="p-2 md:p-3 bg-orange-500 text-white rounded-xl md:rounded-2xl border-2 border-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] md:shadow-[4px_4px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 transition-all"
+            className="shrink-0 flex items-center gap-1.5 bg-orange-500 text-white rounded-xl border-2 border-slate-800 shadow-[2px_2px_0px_0px_rgba(194,65,12,1)] hover:-translate-y-0.5 hover:shadow-[3px_3px_0px_0px_rgba(194,65,12,1)] active:translate-y-0.5 active:shadow-none transition-all duration-150 px-3 py-2 text-[10px] font-black uppercase"
             title="Invite Players"
           >
-            <Share2 className="w-4 h-4 md:w-5 md:h-5" />
+            <Share2 className="w-3.5 h-3.5 md:w-4 md:h-4" />
+            <span className="hidden sm:inline">Invite</span>
           </button>
         </div>
       </header>
+
+      <AnimatePresence>
+        {isCodeModalOpen && (
+          <motion.div
+            className="fixed inset-0 z-[270] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsCodeModalOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.85, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 8 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-sm rounded-3xl border-4 border-slate-800 bg-slate-900 p-8 text-center shadow-[8px_8px_0px_0px_rgba(163,230,53,0.4)]"
+            >
+              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-slate-500 mb-1">Join Code</p>
+              <h2 className="text-lg font-black uppercase tracking-tight text-slate-300 truncate mb-6">{tournament?.name}</h2>
+              <div className="rounded-2xl border-2 border-slate-700 bg-slate-800 px-6 py-8 mb-6">
+                <span className="font-mono text-5xl sm:text-6xl font-black tracking-[0.2em] text-lime-400 select-all break-all">
+                  {tournament?.code}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(tournament?.code ?? '');
+                    setCodeCopied(true);
+                    setTimeout(() => setCodeCopied(false), 2000);
+                  }}
+                  className="min-h-12 rounded-2xl border-2 border-slate-700 bg-slate-800 px-4 text-[11px] font-black uppercase text-white hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  {codeCopied ? <CheckCircle2 className="h-4 w-4 text-lime-400" /> : <Copy className="h-4 w-4" />}
+                  {codeCopied ? 'Copied!' : 'Copy'}
+                </button>
+                <button
+                  onClick={() => setIsCodeModalOpen(false)}
+                  className="min-h-12 rounded-2xl border-2 border-slate-600 bg-slate-800 px-4 text-[11px] font-black uppercase text-slate-400 hover:bg-slate-700 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+              <p className="mt-4 text-[10px] font-bold text-slate-600 uppercase tracking-widest">tap outside to dismiss</p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {isJoinPanelOpen && (
@@ -876,8 +945,8 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
             pairingMode={tournamentPairingMode}
             initialName={sessionManagerMode === 'adjust' ? currentSession?.name : undefined}
             initialAbsences={sessionManagerMode === 'adjust' ? currentSessionAbsences : undefined}
-            heading={sessionManagerMode === 'adjust' ? 'Who Changed?' : undefined}
-            actionLabel={sessionManagerMode === 'adjust' ? 'Save & Rebuild' : 'Start Session'}
+            heading={sessionManagerMode === 'adjust' ? "Who's Out?" : undefined}
+            actionLabel={sessionManagerMode === 'adjust' ? 'Apply Changes' : 'Start Session'}
             allowBelowMinimum={sessionManagerMode === 'adjust'}
             isCreating={isStartingSession}
             onConfirm={sessionManagerMode === 'adjust' ? adjustCurrentSession : startNewSession}
@@ -886,17 +955,39 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
         )}
       </AnimatePresence>
 
-      <nav className="bg-white border-b-2 md:border-b-4 border-slate-800 px-2 md:px-4 overflow-x-auto no-scrollbar">
-        <div className="max-w-4xl mx-auto flex min-w-max">
-          <TabButton active={tab === 'matches'} onClick={() => setTab('matches')} icon={<RotateCcw className="w-3.5 h-3.5 md:w-4 md:h-4" />} label="GAMES" />
-          <TabButton active={tab === 'leaderboard'} onClick={() => setTab('leaderboard')} icon={<Trophy className="w-3.5 h-3.5 md:w-4 md:h-4" />} label="RANKINGS" />
-          {showSetupTab && (
-            <TabButton active={tab === 'setup'} onClick={() => setTab('setup')} icon={<Users className="w-3.5 h-3.5 md:w-4 md:h-4" />} label="PARTICIPANTS" />
-          )}
+      <nav className="bg-slate-900 border-b-2 border-slate-700 px-2 md:px-4 overflow-x-auto no-scrollbar">
+        <div className="max-w-4xl mx-auto flex items-center justify-between min-w-max">
+          <div className="flex">
+            <TabButton active={tab === 'matches'} onClick={() => setTab('matches')} icon={<RotateCcw className="w-3.5 h-3.5 md:w-4 md:h-4" />} label="GAMES" />
+            <TabButton active={tab === 'leaderboard'} onClick={() => setTab('leaderboard')} icon={<Trophy className="w-3.5 h-3.5 md:w-4 md:h-4" />} label="RANKINGS" />
+            {showSetupTab && (
+              <TabButton active={tab === 'setup'} onClick={() => setTab('setup')} icon={<Users className="w-3.5 h-3.5 md:w-4 md:h-4" />} label="PLAYERS" />
+            )}
+          </div>
+          <div className="flex items-center gap-1 pr-3 md:hidden">
+            {(['matches', 'leaderboard', ...(showSetupTab ? ['setup'] : [])] as const).map(t => (
+              <button key={t} onClick={() => setTab(t as typeof tab)} className={`h-1.5 rounded-full transition-all duration-200 ${tab === t ? 'w-4 bg-lime-400' : 'w-1.5 bg-slate-600'}`} />
+            ))}
+          </div>
         </div>
       </nav>
 
-      <main className="flex-1 p-3 md:p-8 max-w-4xl mx-auto w-full">
+      <main
+        className="flex-1 p-3 md:p-8 max-w-4xl mx-auto w-full"
+        onTouchStart={e => {
+          touchStartX.current = e.touches[0].clientX;
+          touchStartY.current = e.touches[0].clientY;
+        }}
+        onTouchEnd={e => {
+          const dx = e.changedTouches[0].clientX - touchStartX.current;
+          const dy = e.changedTouches[0].clientY - touchStartY.current;
+          if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
+          const tabs = (['matches', 'leaderboard', ...(showSetupTab ? ['setup'] : [])] as const);
+          const idx = tabs.indexOf(tab as typeof tabs[number]);
+          if (dx < 0 && idx < tabs.length - 1) setTab(tabs[idx + 1] as typeof tab);
+          else if (dx > 0 && idx > 0) setTab(tabs[idx - 1] as typeof tab);
+        }}
+      >
         <AnimatePresence mode="wait">
           {tab === 'setup' && (
             <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
@@ -919,11 +1010,30 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h2 className="text-xl font-black text-slate-800 md:text-3xl">COURT TRACKER</h2>
-                    {currentSession && (
-                      <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
-                        {currentSession.name}
-                      </p>
-                    )}
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                      {currentSession && <span>{currentSession.name}</span>}
+                      {gamesLeftInRound > 0 ? (
+                        <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-orange-700">
+                          {gamesLeftInRound} left in round {currentRound}
+                        </span>
+                      ) : currentRound > 0 && tournament?.status === 'active' && !playoffStarted ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-lime-300 bg-lime-50 px-2 py-0.5 text-lime-700">
+                          <CheckCircle2 className="h-3 w-3" /> Round {currentRound} complete
+                        </span>
+                      ) : null}
+                      {(() => {
+                        if (players.length < 2 || currentRound === 0) return null;
+                        const total = players.length * (players.length - 1);
+                        const covered = players.reduce((sum, p) => sum + (uniqueOpponents[p.id]?.size ?? 0), 0);
+                        const pct = total > 0 ? Math.round((covered / total) * 100) : 0;
+                        if (pct === 0) return null;
+                        return (
+                          <span className={`rounded-full border px-2 py-0.5 ${pct === 100 ? 'border-lime-300 bg-lime-50 text-lime-700' : 'border-slate-200 bg-white text-slate-500'}`}>
+                            {pct === 100 ? '🎯 all-play' : `${pct}% matchup coverage`}
+                          </span>
+                        );
+                      })()}
+                    </div>
                   </div>
                   {canGenerateNextRound && (
                     <button
@@ -939,7 +1049,8 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                {(canAdjustCurrentSession || canStartNewSession || canCloseTournament) && (
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border-2 border-slate-200 bg-white/70 p-2">
                   {canAdjustCurrentSession && (
                     <button
                       onClick={() => {
@@ -948,10 +1059,11 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                       }}
                       disabled={isGeneratingRound || isStartingSession}
                       className="min-h-10 rounded-xl border-2 border-slate-800 bg-orange-50 px-3 py-2 text-[10px] font-black uppercase text-slate-800 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)]"
+                      title="Mark players out or add substitutes for this round"
                     >
                       <span className="inline-flex items-center gap-2">
                         <UserMinus className="h-3.5 w-3.5" />
-                        Player Left
+                        Mark Player Out
                       </span>
                     </button>
                   )}
@@ -977,11 +1089,12 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
                     >
                       <span className="inline-flex items-center gap-2">
                         <Flag className="h-3.5 w-3.5" />
-                        Close Tournament
+                        Close
                       </span>
                     </button>
                   )}
                 </div>
+                )}
               </div>
               {roundActionError && (
                 <div className="mb-5 flex items-start gap-3 rounded-2xl border-2 border-orange-200 bg-orange-50 px-4 py-3 text-sm font-bold text-orange-700">
@@ -1024,29 +1137,24 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
         </AnimatePresence>
       </main>
 
-      <footer className="p-4 border-t-2 border-lime-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-         <div className="bg-orange-50 text-orange-600 px-4 py-1.5 rounded-xl border-2 border-orange-200 font-black text-xs uppercase tracking-tight">
-            Live Stream Connected
-         </div>
-
-         {canManageTournament && (
-           <div className="flex items-center gap-2 bg-white p-2 rounded-xl border-2 border-slate-200 shadow-sm">
-             <span className="text-[10px] font-black text-slate-400 uppercase">Spectator URL:</span>
-             <code className="text-[10px] font-mono font-bold text-slate-600 bg-slate-50 px-2 py-1 rounded truncate max-w-[150px] md:max-w-xs block">
-               {buildSpectatorUrl(window.location.origin, tournamentId)}
-             </code>
-             <button
-               onClick={() => {
-                 const spectatorUrl = buildSpectatorUrl(window.location.origin, tournamentId);
-                 navigator.clipboard.writeText(`Watch our Pickleball tournament live here (No signup required!): ${spectatorUrl}`);
-                 alert('Spectator link copied!');
-               }}
-               className="bg-lime-400 text-slate-900 px-3 py-1.5 rounded-lg border-2 border-slate-800 text-[10px] font-black uppercase shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:translate-y-0.5 active:translate-y-1 active:shadow-none transition-all"
-             >
-               Copy
-             </button>
-           </div>
-         )}
+      <footer className="px-4 py-3 border-t-2 border-slate-200 bg-white/70 backdrop-blur flex items-center justify-between gap-3 flex-wrap">
+        <div className="inline-flex items-center gap-2 rounded-full border border-lime-300 bg-lime-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-lime-700">
+          <span className="h-1.5 w-1.5 rounded-full bg-lime-500 animate-pulse" />
+          Live
+        </div>
+        {canManageTournament && (
+          <button
+            onClick={() => {
+              const spectatorUrl = buildSpectatorUrl(window.location.origin, tournamentId);
+              navigator.clipboard.writeText(`Watch our Pickleball tournament live here (No signup required!): ${spectatorUrl}`);
+              alert('Spectator link copied!');
+            }}
+            className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-800 bg-white px-3 py-1.5 text-[10px] font-black uppercase text-slate-700 shadow-[2px_2px_0px_0px_rgba(30,41,59,1)] hover:-translate-y-0.5 hover:shadow-[3px_3px_0px_0px_rgba(30,41,59,1)] active:translate-y-0.5 active:shadow-none transition-all duration-150"
+          >
+            <Copy className="h-3 w-3" />
+            Copy Spectator Link
+          </button>
+        )}
       </footer>
     </div>
   );
@@ -1054,10 +1162,12 @@ export default function TournamentDashboard({ tournamentId, readOnly = false, on
 
 function TabButton({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string }) {
   return (
-    <button 
+    <button
       onClick={onClick}
-      className={`px-4 md:px-8 py-3 md:py-5 flex items-center gap-2 text-[10px] md:text-xs font-black transition-all border-b-2 md:border-b-4 tracking-widest ${
-        active ? 'border-orange-500 text-slate-800' : 'border-transparent text-slate-400 hover:text-slate-600'
+      className={`px-4 md:px-7 py-2.5 md:py-4 flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs font-black transition-all duration-150 border-b-[3px] tracking-widest ${
+        active
+          ? 'border-lime-400 text-white'
+          : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-600'
       }`}
     >
       {icon}
